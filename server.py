@@ -14,9 +14,9 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# ==================== CẤU HÌNH — ĐÃ SỬA MODEL CHẮC CHẠY ====================
+# ==================== CẤU HÌNH ====================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-pro"  # ✅ Luôn hoạt động, không báo 404
+GEMINI_MODEL = "gemini-pro"
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 # === THƯ MỤC ===
@@ -64,7 +64,7 @@ def luu_vao_kho(loai, ten_file, mo_ta):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# -------------------- TẠO FILE KẾT QUẢ --------------------
+# -------------------- TẠO FILE --------------------
 def tao_word(noi_dung):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
@@ -218,20 +218,18 @@ def trang_chu():
     <style>
         :root {
             --primary: #165DFF; --success: #00B42A; --danger: #F53F3F;
-            --bg: #F7F8FA; --card: #FFFFFF; --bubble-user: #E8F3FF;
-            --bubble-ai: #F2F3F5; --text-1: #1D2129; --text-2: #4E5969;
-            --border: #E5E6EB; --shadow: 0 2px 12px rgba(0,0,0,0.08);
-            --radius: 16px;
+            --bg: #F7F8FA; --card: #FFFFFF;
+            --bubble-user: #E8F3FF; --bubble-ai: #F2F3F5;
+            --text-1: #1D2129; --text-2: #4E5969; --border: #E5E6EB;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif; background: var(--bg);
             height: 100vh; display: flex; flex-direction: column;
-            color: var(--text-1);
         }
         .header {
-            padding: 16px 24px; background: white; box-shadow: var(--shadow);
-            display: flex; align-items: center; gap: 12px; z-index: 10;
+            padding: 16px 24px; background: white; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            display: flex; align-items: center; gap: 12px;
         }
         .logo {
             width: 40px; height: 40px; border-radius: 10px; background: linear-gradient(135deg, #165DFF, #4080FF);
@@ -240,14 +238,13 @@ def trang_chu():
         .header h1 { font-size: 18px; font-weight: 600; }
         .header p { font-size: 13px; color: var(--text-2); }
 
-        /* KHU HỘI THOẠI — CHUNG 1 KHỐI */
         .chat-container { flex: 1; overflow-y: auto; padding: 20px; max-width: 800px; margin: 0 auto; width: 100%; }
         .message { margin-bottom: 24px; display: flex; max-width: 95%; animation: bubbleIn 0.3s ease; }
         @keyframes bubbleIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .message.user { justify-content: flex-end; margin-left: auto; }
         .message.ai { justify-content: flex-start; margin-right: auto; }
         .bubble {
-            padding: 16px 20px; border-radius: var(--radius); line-height: 1.6; white-space: pre-wrap;
+            padding: 16px 20px; border-radius: 16px; line-height: 1.6; white-space: pre-wrap;
         }
         .user .bubble { background: var(--bubble-user); border-bottom-right-radius: 4px; }
         .ai .bubble { background: var(--bubble-ai); border-bottom-left-radius: 4px; }
@@ -255,9 +252,7 @@ def trang_chu():
             display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
             background: #E8FFEA; border-radius: 20px; font-size: 13px; margin-bottom: 10px;
         }
-        .download-row {
-            display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap;
-        }
+        .download-row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
         .dl-btn {
             padding: 8px 16px; border-radius: 20px; text-decoration: none; font-size: 13px; font-weight: 600;
             display: inline-flex; align-items: center; gap: 6px; transition: transform 0.2s;
@@ -267,7 +262,14 @@ def trang_chu():
         .dl-excel { background: #E8FFEA; color: var(--success); }
         .dl-pdf { background: #FFECEC; color: var(--danger); }
 
-        /* Ô NHẬP LIỆU — DƯỚI CÙNG, CHUNG 1 NƠI */
+        .file-selected {
+            max-width: 800px; margin: 8px auto 0; display: flex; align-items: center;
+            gap: 10px; padding: 8px 16px; background: #E8FFEA; border-radius: 8px; font-size: 14px;
+            display: none;
+        }
+        .file-selected.show { display: flex; }
+        .clear-file { margin-left: auto; cursor: pointer; color: var(--danger); font-weight: bold; border: none; background: none; font-size: 18px; }
+
         .input-bar {
             background: white; padding: 16px 20px; box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
             border-top: 1px solid var(--border);
@@ -292,15 +294,8 @@ def trang_chu():
             width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--primary);
             color: white; cursor: pointer; font-size: 18px; transition: all 0.2s; flex-shrink: 0;
         }
-        .send-btn:hover { background: var(--primary-dark); transform: scale(1.05); }
+        .send-btn:hover { background: #0E42D2; transform: scale(1.05); }
         .send-btn:disabled { background: #C9CDD4; cursor: not-allowed; transform: none; }
-        .file-selected {
-            width: 100%; max-width: 800px; margin: 8px auto 0; display: flex; align-items: center;
-            gap: 10px; padding: 8px 16px; background: #E8FFEA; border-radius: 8px; font-size: 14px;
-            display: none;
-        }
-        .file-selected.show { display: flex; }
-        .clear-file { margin-left: auto; cursor: pointer; color: var(--danger); font-weight: bold; }
     </style>
 </head>
 <body>
@@ -326,19 +321,19 @@ def trang_chu():
     <div class="file-selected" id="thongTinTep">
         <span>📎</span>
         <span id="tenTep"></span>
-        <span class="clear-file" onclick="xoaTep()">✕</span>
+        <button class="clear-file" onclick="xoaTep()">✕</button>
     </div>
 
     <div class="input-bar">
         <div class="input-inner">
-            <button class="attach-btn" onclick="document.getElementById('chonTep').click()" title="Tải tệp">📎</button>
-            <input type="file" id="chonTep" accept=".docx,.xlsx,.txt,.pdf" style="display:none;" onchange="chonTep(this)">
+            <button class="attach-btn" id="nutDinhKem" title="Tải tệp">📎</button>
+            <input type="file" id="chonTep" accept=".docx,.xlsx,.txt,.pdf" style="display:none;">
             
             <div class="input-wrapper">
-                <textarea id="noiDungNhap" placeholder="Nhập yêu cầu... (Enter gửi, Shift+Enter xuống dòng)" onkeydown="xuLyPhim(event)"></textarea>
+                <textarea id="noiDungNhap" placeholder="Nhập yêu cầu... (Enter gửi, Shift+Enter xuống dòng)"></textarea>
             </div>
             
-            <button class="send-btn" id="nutGui" onclick="guiYeuCau()" title="Gửi">➤</button>
+            <button class="send-btn" id="nutGui" title="Gửi">➤</button>
         </div>
     </div>
 
@@ -346,8 +341,25 @@ def trang_chu():
         let fileContent = "";
         let tenTepDaChon = "";
 
-        function chonTep(input) {
-            const file = input.files[0];
+        // Gắn sự kiện sau khi trang tải xong
+        document.addEventListener('DOMContentLoaded', function() {
+            // Nút đính kèm
+            document.getElementById('nutDinhKem').addEventListener('click', function() {
+                document.getElementById('chonTep').click();
+            });
+            
+            // Chọn file
+            document.getElementById('chonTep').addEventListener('change', chonTep);
+            
+            // Nút gửi
+            document.getElementById('nutGui').addEventListener('click', guiYeuCau);
+            
+            // Enter gửi
+            document.getElementById('noiDungNhap').addEventListener('keydown', xuLyPhim);
+        });
+
+        function chonTep(e) {
+            const file = e.target.files[0];
             if (!file) return;
             tenTepDaChon = file.name;
             const formData = new FormData();
@@ -364,7 +376,7 @@ def trang_chu():
                         themTinNhan("ai", "❌ " + (data.error || "Lỗi tải tệp"));
                     }
                 })
-                .catch(e => themTinNhan("ai", "❌ Lỗi kết nối khi tải tệp"));
+                .catch(err => themTinNhan("ai", "❌ Lỗi kết nối khi tải tệp: " + err.message));
         }
 
         function xoaTep() {
@@ -381,12 +393,15 @@ def trang_chu():
             }
         }
 
-        function themTinNhan(loai, noiDung, fileLinks = null) {
+        function themTinNhan(loai, noiDung, fileLinks) {
             const khu = document.getElementById("khuTroChuyen");
             const div = document.createElement("div");
             div.className = `message ${loai}`;
             
-            let noiDungHtml = noiDung.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            let noiDungHtml = noiDung
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
             
             let linksHtml = "";
             if (fileLinks) {
@@ -425,7 +440,6 @@ def trang_chu():
             nut.disabled = true;
             nut.textContent = "⏳";
             
-            // Gọi API
             try {
                 const res = await fetch("/api/chat", {
                     method: "POST",
@@ -452,7 +466,7 @@ def trang_chu():
                 xoaTep();
                 
             } catch (e) {
-                themTinNhan("ai", "❌ Lỗi: " + e.message);
+                themTinNhan("ai", "❌ Lỗi: " + (e.message || "Không xác định"));
             } finally {
                 nut.disabled = false;
                 nut.textContent = "➤";
