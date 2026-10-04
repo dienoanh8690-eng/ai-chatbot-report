@@ -3,6 +3,7 @@ import requests
 import os
 import uuid
 import json
+import re
 from datetime import datetime
 from docx import Document
 from docx.oxml.ns import qn
@@ -11,11 +12,11 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from xhtml2pdf import pisa
 from flask_cors import CORS
 
-# === KHAI BÁO APP ĐẦU TIÊN ===
+# === KHAI BÁO APP ĐẦU TIÊN — ĐÚNG VỊ TRÍ ===
 app = Flask(__name__)
 CORS(app)
 
-# ==================== CẤU HÌNH — ĐỌC TỪ BIẾN MÔI TRƯỜNG ====================
+# ==================== CẤU HÌNH ====================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-3.5-flash"
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
@@ -68,7 +69,7 @@ def luu_vao_kho(loai, ten_file, mo_ta):
         pass
 
 
-# ==================== TẠO FILE — TỐI ƯU BỘ NHỚ ====================
+# ==================== TẠO FILE ====================
 def tao_word(noi_dung):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
@@ -284,7 +285,7 @@ def download(ten_file):
 
 @app.route("/")
 def trang_chu():
-    return """
+    return r"""
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -755,7 +756,7 @@ def trang_chu():
         let uploadedContent = "";
         let uploadedFileName = "";
 
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('uploadZone').addEventListener('click', () => {
                 document.getElementById('fileInput').click();
             });
@@ -808,7 +809,7 @@ def trang_chu():
         }
 
         function cleanHtmlTags(text) {
-            // Sửa lỗi escape regex — dùng chuỗi thô
+            // Sửa lỗi regex — dùng pattern chuẩn
             return text.replace(/<span\b[^>]*>/gi, '').replace(/<\/span>/gi, '');
         }
 
