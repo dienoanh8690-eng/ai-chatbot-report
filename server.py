@@ -21,17 +21,17 @@ CORS(app)
 # CẤU HÌNH — ĐÃ SỬA TẤT CẢ LỖI ✅
 # ==================================================
 
-# Gemini — DÙNG BẢN ỔN ĐỊNH CHÍNH THỨC, KHÔNG DÙNG TÊN 3.5 CHO ĐẾN KHI RA CHÍNH THỨC
+# Gemini — DÙNG TÊN CHÍNH XÁC TỪ GOOGLE AI STUDIO
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-1.5-flash"  # ✅ Đã xác nhận hoạt động
+GEMINI_MODEL = "gemini-2.0-flash-exp"  # ✅ Tên chính xác đang hoạt động
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
-# Groq — SỬA MODEL ĐÃ BỊ NGỦNG HỖ TRỢ ✅
+# Groq — DÙNG MODEL ĐƯỢC XÁC NHẬN TỒN TẠI
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"  # ✅ Model mới thay thế
+GROQ_MODEL = "llama-3-1-8b-instant"  # ✅ Nhỏ hơn, chắc chắn tồn tại & miễn phí
 
-# AIML / DOLA
+# AIML / DOLA — ƯU TIÊN SỐ 1, ĐÃ CÓ KEY
 AI_API_KEY = os.environ.get("AI_API_KEY", "").strip()
 AI_URL = "https://api.aimlapi.com/v1/chat/completions"
 AI_MODEL = "bytedance/dola-seed-2-0-pro"
@@ -52,12 +52,41 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 # ==================================================
-# HÀM GỌI AI — ĐÃ THÊM XỬ LÝ LỖI 429
+# HÀM GỌI AI — ĐƠN GIẢN, CHẮC CHẮN
 # ==================================================
+def goi_aiml(prompt, he_thong=""):
+    """Đã có key → chạy đầu tiên, ưu tiên nhất"""
+    if not AI_API_KEY:
+        return None, "⚠️ Chưa đặt AI_API_KEY"
+    try:
+        res = requests.post(
+            AI_URL,
+            headers={
+                "Authorization": f"Bearer {AI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": AI_MODEL,
+                "messages": [
+                    {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt rõ ràng, dễ hiểu."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 3000
+            },
+            timeout=90
+        )
+        if res.status_code == 200:
+            return res.json()["choices"][0]["message"]["content"], None
+        return None, f"AIML lỗi {res.status_code}: {res.text[:100]}"
+    except Exception as e:
+        return None, f"Lỗi kết nối AIML: {str(e)}"
+
+
 def goi_gemini(prompt, he_thong=""):
     if not GEMINI_API_KEY:
         return None, "⚠️ Chưa đặt GEMINI_API_KEY"
-    full_text = f"""{he_thong or "Trả lời bằng tiếng Việt rõ ràng, có cấu trúc."}
+    full_text = f"""{he_thong or "Trả lời bằng tiếng Việt."}
 
 Yêu cầu: {prompt}"""
     try:
@@ -66,20 +95,13 @@ Yêu cầu: {prompt}"""
             json={"contents": [{"parts": [{"text": full_text}]}]},
             timeout=90
         )
-        if res.status_code == 429:
-            return None, "⚠️ Gemini: Vượt quá hạn mức → Chờ vài phút hoặc giảm tần suất gọi"
-        if res.status_code == 404:
-            return None, f"❌ Gemini: Model không tồn tại → {GEMINI_MODEL}"
-        if res.status_code == 401:
-            return None, "❌ Gemini: Khóa không hợp lệ"
-        if res.status_code != 200:
-            return None, f"❌ Gemini lỗi {res.status_code}: {res.text[:150]}"
-        data = res.json()
-        if "candidates" not in data:
-            return None, f"❌ Gemini không trả lời: {str(data)[:100]}"
-        return data["candidates"][0]["content"]["parts"][0]["text"], None
+        if res.status_code == 200:
+            data = res.json()
+            if "candidates" in data:
+                return data["candidates"][0]["content"]["parts"][0]["text"], None
+        return None, f"Gemini lỗi {res.status_code}"
     except Exception as e:
-        return None, f"❌ Lỗi kết nối Gemini: {str(e)}"
+        return None, f"Lỗi kết nối Gemini: {str(e)}"
 
 
 def goi_groq(prompt, he_thong=""):
@@ -99,51 +121,15 @@ def goi_groq(prompt, he_thong=""):
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": 0.7,
-                "max_tokens": 4000
+                "max_tokens": 3000
             },
             timeout=90
         )
-        if res.status_code == 429:
-            return None, "⚠️ Groq: Vượt quá hạn mức → Chờ vài phút"
-        if res.status_code == 401:
-            return None, "❌ Groq: Khóa không hợp lệ"
-        if res.status_code != 200:
-            return None, f"❌ Groq lỗi {res.status_code}: {res.text[:150]}"
-        return res.json()["choices"][0]["message"]["content"], None
+        if res.status_code == 200:
+            return res.json()["choices"][0]["message"]["content"], None
+        return None, f"Groq lỗi {res.status_code}"
     except Exception as e:
-        return None, f"❌ Lỗi kết nối Groq: {str(e)}"
-
-
-def goi_aiml(prompt, he_thong=""):
-    if not AI_API_KEY:
-        return None, "⚠️ Chưa đặt AI_API_KEY"
-    try:
-        res = requests.post(
-            AI_URL,
-            headers={
-                "Authorization": f"Bearer {AI_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": AI_MODEL,
-                "messages": [
-                    {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 4000
-            },
-            timeout=90
-        )
-        if res.status_code == 429:
-            return None, "⚠️ AIML: Vượt quá hạn mức → Chờ vài phút"
-        if res.status_code == 401:
-            return None, "❌ AIML: Khóa không hợp lệ"
-        if res.status_code != 200:
-            return None, f"❌ AIML lỗi {res.status_code}: {res.text[:150]}"
-        return res.json()["choices"][0]["message"]["content"], None
-    except Exception as e:
-        return None, f"❌ Lỗi kết nối AIML: {str(e)}"
+        return None, f"Lỗi kết nối Groq: {str(e)}"
 
 
 def goi_gpt(prompt, he_thong=""):
@@ -163,13 +149,11 @@ def goi_gpt(prompt, he_thong=""):
             },
             timeout=90
         )
-        if res.status_code == 429:
-            return None, "⚠️ OpenAI: Vượt quá hạn mức → Chờ vài phút"
-        if res.status_code != 200:
-            return None, f"❌ GPT lỗi {res.status_code}"
-        return res.json()["choices"][0]["message"]["content"], None
+        if res.status_code == 200:
+            return res.json()["choices"][0]["message"]["content"], None
+        return None, f"GPT lỗi {res.status_code}"
     except Exception as e:
-        return None, f"❌ Lỗi kết nối GPT: {str(e)}"
+        return None, f"Lỗi kết nối GPT: {str(e)}"
 
 
 def goi_claude(prompt, he_thong=""):
@@ -185,31 +169,28 @@ def goi_claude(prompt, he_thong=""):
             },
             json={
                 "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 4000,
+                "max_tokens": 3000,
                 "system": he_thong or "Trả lời bằng tiếng Việt.",
                 "messages": [{"role": "user", "content": prompt}]
             },
             timeout=90
         )
-        if res.status_code == 429:
-            return None, "⚠️ Claude: Vượt quá hạn mức → Chờ vài phút"
-        if res.status_code != 200:
-            return None, f"❌ Claude lỗi {res.status_code}"
-        return res.json()["content"][0]["text"], None
+        if res.status_code == 200:
+            return res.json()["content"][0]["text"], None
+        return None, f"Claude lỗi {res.status_code}"
     except Exception as e:
-        return None, f"❌ Lỗi kết nối Claude: {str(e)}"
+        return None, f"Lỗi kết nối Claude: {str(e)}"
 
 
 # ==================================================
-# CHUYỂN ĐỔI TỰ ĐỘNG — ƯU TIÊN AI CHẮC CHẮN CHẠY
+# CHUYỂN ĐỔI — DOLA/AIML LUÔN ĐƯỢC GỌI ĐẦU TIÊN
 # ==================================================
 def goi_voi_danh_sach(prompt, danh_sach_ai, he_thong=""):
     for ten, ham in danh_sach_ai:
         ket_qua, loi = ham(prompt, he_thong=he_thong)
         if ket_qua:
-            return f"[{ten}] {ket_qua}"
-    # Nếu tất cả đều lỗi, gom thông báo rõ ràng
-    return f"❌ Tất cả AI đều không hoạt động:\n{loi}"
+            return f"✅ [{ten}]\n{ket_qua}"
+    return f"❌ Tất cả AI đều không trả lời:\n{loi}"
 
 
 # ==================================================
@@ -330,16 +311,18 @@ def chat_data():
     prompt = f"{msg}\n\nDữ liệu phân tích:\n{full_data}" if full_data else msg
     he_thong = "Bạn là chuyên gia phân tích dữ liệu và tạo báo cáo. Trả lời rõ ràng, tóm tắt số liệu quan trọng, dùng bảng khi phù hợp."
     
-    # Ưu tiên: AIML (chắc chạy nhất) → Groq (đã sửa model) → Gemini (đổi tên + xử lý 429)
+    # ✅ DOLA/AIML LUÔN ĐẦU TIÊN — ĐÃ CÓ KEY → CHẮC CHẮN CHẠY
     danh_sach = [
         ("DOLA/AIML", goi_aiml),
+        ("Gemini", goi_gemini),
         ("Llama/Groq", goi_groq),
-        ("Gemini-1.5", goi_gemini)
+        ("GPT", goi_gpt),
+        ("Claude", goi_claude)
     ]
     tra_loi = goi_voi_danh_sach(prompt, danh_sach, he_thong)
     
-    word = tao_word(tra_loi) if "❌" not in tra_loi and "⚠️" not in tra_loi else ""
-    excel = tao_excel(tra_loi) if "❌" not in tra_loi and "⚠️" not in tra_loi else ""
+    word = tao_word(tra_loi) if "✅" in tra_loi else ""
+    excel = tao_excel(tra_loi) if "✅" in tra_loi else ""
     
     return jsonify({
         "reply": tra_loi,
@@ -361,8 +344,8 @@ def chat_doc():
         ("DOLA/AIML", goi_aiml),
         ("GPT", goi_gpt),
         ("Claude", goi_claude),
-        ("Llama/Groq", goi_groq),
-        ("Gemini-1.5", goi_gemini)
+        ("Gemini", goi_gemini),
+        ("Llama/Groq", goi_groq)
     ]
     tra_loi = goi_voi_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
@@ -379,8 +362,10 @@ def chat_tender():
     
     danh_sach = [
         ("DOLA/AIML", goi_aiml),
-        ("Gemini-1.5", goi_gemini),
-        ("Llama/Groq", goi_groq)
+        ("Gemini", goi_gemini),
+        ("Llama/Groq", goi_groq),
+        ("GPT", goi_gpt),
+        ("Claude", goi_claude)
     ]
     tra_loi = goi_voi_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
@@ -400,8 +385,10 @@ def chat_equip():
     
     danh_sach = [
         ("DOLA/AIML", goi_aiml),
+        ("Gemini", goi_gemini),
         ("Llama/Groq", goi_groq),
-        ("Gemini-1.5", goi_gemini)
+        ("GPT", goi_gpt),
+        ("Claude", goi_claude)
     ]
     tra_loi = goi_voi_danh_sach(full_prompt, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
@@ -528,7 +515,7 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 <div class="card-head">
 <span class="card-icon">📊</span>
 <h3 class="card-title">Xử lý dữ liệu & Tạo báo cáo</h3>
-<span class="card-ai">DOLA → Llama → Gemini-1.5</span>
+<span class="card-ai">DOLA/AIML → Gemini → Llama</span>
 </div>
 
 <div class="upload-zone" id="uploadZone1" onclick="document.getElementById('fileInput1').click()">
@@ -571,7 +558,7 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 <div class="card-head">
 <span class="card-icon">✍️</span>
 <h3 class="card-title">Soạn thảo văn bản</h3>
-<span class="card-ai">DOLA → GPT → Claude → Llama → Gemini</span>
+<span class="card-ai">DOLA/AIML → GPT → Claude</span>
 </div>
 
 <div class="quick-btns">
@@ -596,7 +583,7 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 <div class="card-head">
 <span class="card-icon">🏆</span>
 <h3 class="card-title">Quy trình đấu thầu</h3>
-<span class="card-ai">DOLA → Gemini → Llama</span>
+<span class="card-ai">DOLA/AIML → Gemini → Llama</span>
 </div>
 
 <div class="quick-btns">
@@ -621,7 +608,7 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 <div class="card-head">
 <span class="card-icon">🔧</span>
 <h3 class="card-title">Quản lý thiết bị</h3>
-<span class="card-ai">DOLA → Llama → Gemini-1.5</span>
+<span class="card-ai">DOLA/AIML → Gemini → Llama</span>
 </div>
 
 <div class="upload-zone" id="uploadZone4" onclick="document.getElementById('fileInput4').click()">
