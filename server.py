@@ -63,22 +63,34 @@ def luu_vao_kho(loai, ten_file, mo_ta):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# ==================== TẠO FILE BÁO CÁO ====================
+# ==================== TẠO FILE BÁO CÁO — ĐÃ SỬA LỖI FONT ====================
 def tao_word(noi_dung):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
     doc = Document()
+    
+    # Tiêu đề
     p = doc.add_heading("BÁO CÁO XỬ LÝ DỮ LIỆU", 0)
     for run in p.runs:
         run.font.name = "Arial"
         run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
-    doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    
+    # Ngày tạo
+    p = doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    for run in p.runs:
+        run.font.name = "Arial"
+        run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+    
     doc.add_paragraph("-" * 60)
+    
+    # Nội dung
     for dong in noi_dung.split("\n"):
         if dong.strip():
-            p = doc.add_paragraph(dong)
-            p.runs[0].font.name = "Arial"
-            p._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+            p = doc.add_paragraph()
+            run = p.add_run(dong.strip())
+            run.font.name = "Arial"
+            run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+    
     doc.save(duong_dan)
     return ten
 
@@ -189,10 +201,13 @@ def chat_bao_cao():
     
     word = excel = pdf = ""
     if "❌" not in tra_loi and "⚠️" not in tra_loi:
-        word = tao_word(tra_loi)
-        excel = tao_excel(tra_loi)
-        pdf = tao_pdf(tra_loi)
-        luu_vao_kho("ket_qua", word, cau_hoi[:100])
+        try:
+            word = tao_word(tra_loi)
+            excel = tao_excel(tra_loi)
+            pdf = tao_pdf(tra_loi)
+            luu_vao_kho("ket_qua", word, cau_hoi[:100])
+        except Exception as e:
+            return jsonify({"reply": f"✅ Xong! Nhưng lỗi tạo file: {str(e)}", "word":"", "excel":"", "pdf":""})
     
     return jsonify({
         "reply": tra_loi,
@@ -638,4 +653,4 @@ def trang_chu():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
