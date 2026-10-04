@@ -12,7 +12,6 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from xhtml2pdf import pisa
 from flask_cors import CORS
 
-# === KHAI BÁO APP ĐẦU TIÊN ===
 app = Flask(__name__)
 CORS(app)
 
@@ -314,6 +313,7 @@ def trang_chu():
 --border: #e2e8f0;
 --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
 --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+--shadow-lg: 0 8px 24px rgba(0,0,0,0.06);
 --radius-sm: 8px;
 --radius-md: 12px;
 --radius-lg: 16px;
@@ -410,29 +410,36 @@ color: var(--primary);
 font-weight: 500;
 }
 .main-container {
-max-width: 1200px;
+max-width: 1280px;
 margin: 20px auto;
 padding: 0 24px 40px;
 display: grid;
 grid-template-columns: 1fr 1fr;
-gap: 24px;
+gap: 28px;
+align-items: stretch;
 }
 .card {
 background: white;
 border-radius: var(--radius-lg);
 padding: 24px;
-box-shadow: var(--shadow-md);
+box-shadow: var(--shadow-lg);
 display: flex;
 flex-direction: column;
 height: calc(100vh - 200px);
-min-height: 600px;
+min-height: 650px;
+}
+.card.blue-card {
+border-top: 4px solid var(--primary);
+}
+.card.purple-card {
+border-top: 4px solid var(--secondary);
 }
 .card-header {
 display: flex;
 align-items: center;
 gap: 10px;
-padding-bottom: 14px;
-margin-bottom: 18px;
+padding-bottom: 16px;
+margin-bottom: 20px;
 border-bottom: 2px solid transparent;
 }
 .card-header.blue { border-bottom-color: #dbeafe; }
@@ -448,7 +455,7 @@ padding: 14px 16px;
 text-align: center;
 cursor: pointer;
 transition: all 0.3s ease;
-margin-bottom: 12px;
+margin-bottom: 14px;
 display: flex;
 align-items: center;
 justify-content: center;
@@ -467,10 +474,10 @@ transform: translateY(-1px);
 display: none;
 align-items: center;
 gap: 10px;
-padding: 10px 16px;
+padding: 12px 16px;
 background: #ecfdf5;
 border-radius: var(--radius-sm);
-margin-bottom: 12px;
+margin-bottom: 14px;
 }
 .file-info.show { display: flex; }
 .file-name { flex: 1; font-size: 14px; font-weight: 500; }
@@ -488,7 +495,7 @@ transition: transform 0.2s;
 display: grid;
 grid-template-columns: repeat(2, 1fr);
 gap: 10px;
-margin-bottom: 12px;
+margin-bottom: 14px;
 }
 .quick-btn {
 padding: 12px 14px;
@@ -586,6 +593,7 @@ line-height: 1.6;
 font-size: 14px;
 white-space: pre-wrap;
 word-break: break-word;
+max-width: 90%;
 }
 .message.user .bubble {
 background: linear-gradient(135deg, #dbeafe, #e0e7ff);
@@ -644,6 +652,7 @@ transition: all 0.2s ease;
 display: flex;
 gap: 10px;
 align-items: flex-end;
+margin-top: auto;
 }
 textarea {
 flex: 1;
@@ -662,7 +671,7 @@ textarea:focus {
 border-color: var(--primary);
 box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
 }
-.card.purple textarea:focus {
+.card.purple-card textarea:focus {
 border-color: var(--secondary);
 box-shadow: 0 0 0 3px rgba(124,58,237,0.1);
 }
@@ -687,11 +696,11 @@ background: #cbd5e1;
 cursor: not-allowed;
 transform: none;
 }
-.card.purple .send-btn { background: var(--secondary); }
-.card.purple .send-btn:hover { background: #6d28d9; }
+.card.purple-card .send-btn { background: var(--secondary); }
+.card.purple-card .send-btn:hover { background: #6d28d9; }
 @media (max-width: 900px) {
-.main-container { grid-template-columns: 1fr; }
-.card { height: auto; min-height: 500px; }
+.main-container { grid-template-columns: 1fr; gap: 24px; }
+.card { height: auto; min-height: 550px; }
 }
 </style>
 </head>
@@ -724,7 +733,7 @@ transform: none;
 </div>
 </div>
 <div class="main-container">
-<div class="card">
+<div class="card blue-card">
 <div class="card-header blue">
 <span class="card-icon">📊</span>
 <h2 class="card-title blue">Xử lý dữ liệu & Tạo báo cáo</h2>
@@ -764,7 +773,7 @@ transform: none;
 <button class="send-btn" id="reportBtn" onclick="sendReport()">➤</button>
 </div>
 </div>
-<div class="card purple">
+<div class="card purple-card">
 <div class="card-header purple">
 <span class="card-icon">💬</span>
 <h2 class="card-title purple">Trò chuyện với AI</h2>
