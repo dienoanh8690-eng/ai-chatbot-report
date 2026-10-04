@@ -39,7 +39,9 @@ def doc_file(duong_dan, dinh_dang):
         elif dinh_dang == "xlsx":
             wb = load_workbook(duong_dan, data_only=True)
             ws = wb.active
-            noi_dung = "\n".join([" | ".join(str(c) if c else "" for c in row) for row in ws.iter_rows(values_only=True)])
+            noi_dung = ""
+            for hang in ws.iter_rows(values_only=True):
+                noi_dung += " | ".join(str(c) if c else "" for c in hang) + "\n"
         elif dinh_dang in ["txt", "md"]:
             with open(duong_dan, "r", encoding="utf-8", errors="ignore") as f:
                 noi_dung = f.read()
@@ -68,9 +70,9 @@ def tao_word(noi_dung):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
     doc = Document()
-    doc.add_heading("BÁO CÁO", 0)
-    doc.add_paragraph(f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-    doc.add_paragraph("-" * 50)
+    doc.add_heading("BÁO CÁO XỬ LÝ DỮ LIỆU", 0)
+    doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    doc.add_paragraph("-" * 60)
     for dong in noi_dung.split("\n"):
         if dong.strip():
             doc.add_paragraph(dong)
@@ -84,11 +86,13 @@ def tao_excel(noi_dung=""):
     duong_dan = os.path.join(RESULT_FOLDER, ten)
     wb = Workbook()
     ws = wb.active
-    ws.append(["Nội dung báo cáo"])
+    ws.title = "Dữ liệu đã xử lý"
+    ws.append(["BÁO CÁO DỮ LIỆU THIẾT BỊ"])
+    ws.append([f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}"])
+    ws.append([])
     for dong in noi_dung.split("\n"):
         if dong.strip():
-            ws.append([dong])
-    ws.append(["Ngày tạo", datetime.now().strftime("%d/%m/%Y %H:%M")])
+            ws.append([dong.strip()])
     wb.save(duong_dan)
     return ten
 
@@ -99,12 +103,13 @@ def tao_pdf(noi_dung):
     duong_dan = os.path.join(RESULT_FOLDER, ten)
     html = f"""
     <html><head><meta charset="utf-8"><style>
-        body {{ font-family: Arial; padding: 20px; }}
-        h1 {{ text-align: center; color: #0f4c81; }}
+        body {{ font-family: Arial; padding: 25px; line-height: 1.6; }}
+        h1 {{ text-align: center; color: #0f4c81; border-bottom: 2px solid #0f4c81; padding-bottom: 10px; }}
+        .ngay {{ text-align: right; color: #666; margin-bottom: 20px; }}
     </style></head>
     <body>
-        <h1>BÁO CÁO</h1>
-        <p>Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+        <h1>BÁO CÁO XỬ LÝ DỮ LIỆU</h1>
+        <p class="ngay">Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
         <hr>
         <p>{noi_dung.replace(chr(10), '<br>')}</p>
     </body></html>
@@ -119,27 +124,35 @@ def goi_ai(noi_dung, file_content=""):
     if not GEMINI_API_KEY:
         return "⚠️ Chưa đặt GEMINI_API_KEY"
     
-    prompt = f"""Bạn là trợ lý chuyên về thủy điện. Trả lời rõ ràng, dễ hiểu, chính xác.
+    prompt = f"""Bạn là chuyên gia xử lý dữ liệu và lập báo cáo cho nhà máy thủy điện.
 
-NỘI DUNG YÊU CẦU:
+Yêu cầu người dùng:
 {noi_dung}
 
-NỘI DUNG FILE ĐÍNH KÈM:
+Nội dung file đính kèm:
 {file_content if file_content else '(Không có file)'}
+
+---
+Hãy thực hiện đúng yêu cầu:
+1. Kiểm tra, chỉnh sửa dữ liệu: đúng tên, đúng hàng, đúng cột
+2. Sắp xếp theo thứ tự A-Z theo tên/mã trong từng hệ thống
+3. Tính toán tổng hợp giá trị, thành tiền = đơn giá × số lượng, tổng cộng
+4. Trình bày rõ ràng, có cấu trúc, dễ xem trên màn hình
+5. Kết quả trình bày đầy đủ ngay bên dưới, không tóm tắt
 """
     
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.3}
+            "generationConfig": {"maxOutputTokens": 4096, "temperature": 0.2}
         }
-        res = requests.post(url, json=payload, timeout=120)
+        res = requests.post(url, json=payload, timeout=300)
         if res.status_code == 200:
             return res.json()["candidates"][0]["content"]["parts"][0]["text"]
-        return f"❌ Lỗi API {res.status_code}"
+        return f"❌ Lỗi API {res.status_code}: {res.text[:200]}"
     except Exception as e:
-        return f"❌ Lỗi: {str(e)}"
+        return f"❌ Lỗi kết nối: {str(e)}"
 
 
 # ==================== ROUTE ====================
@@ -164,10 +177,10 @@ def upload():
     noi_dung = doc_file(duong_dan, ext)
     luu_vao_kho("tai_lieu", ten_moi, f.filename)
     
-    return jsonify({"status": "ok", "name": f.filename, "content": noi_dung[:2000]})
+    return jsonify({"status": "ok", "name": f.filename, "content": noi_dung[:3000]})
 
 
-# Chat
+# Chat & xử lý
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.json
@@ -175,7 +188,7 @@ def chat():
     file_content = data.get("file_content", "")
     
     if not cau_hoi and not file_content:
-        return jsonify({"reply": "Vui lòng nhập nội dung hoặc tải file lên!"})
+        return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải file lên!"})
     
     tra_loi = goi_ai(cau_hoi, file_content)
     
@@ -216,25 +229,35 @@ def trang_chu():
     <title>All thủy điện</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: Arial, sans-serif; }
-        body { max-width: 700px; margin: 30px auto; padding: 0 20px; background: #f0f7ff; }
+        body { max-width: 850px; margin: 30px auto; padding: 0 20px; background: #f0f7ff; }
         h1 { text-align: center; color: #0f4c81; margin-bottom: 30px; }
         .box { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         
         /* Khu tải file */
-        .upload-area { border: 2px dashed #94b8d9; padding: 30px; text-align: center; border-radius: 10px; cursor: pointer; margin-bottom: 20px; }
+        .upload-area { border: 2px dashed #94b8d9; padding: 25px; text-align: center; border-radius: 10px; cursor: pointer; margin-bottom: 15px; transition: 0.3s; }
         .upload-area:hover { border-color: #0f4c81; background: #e6f2ff; }
         .upload-area.active { border-color: #22c55e; background: #f0fdf4; }
-        .file-info { margin: 10px 0; padding: 10px; background: #e6ffed; border-radius: 6px; display: none; }
+        .file-info { margin: 10px 0 20px; padding: 10px 15px; background: #e6ffed; border-radius: 6px; display: none; color: #166534; font-weight: bold; }
         
-        textarea { width: 100%; height: 100px; padding: 12px; border: 1px solid #b3d1e8; border-radius: 8px; font-size: 15px; margin-bottom: 15px; }
-        button { background: #0f4c81; color: white; border: none; padding: 12px 30px; border-radius: 8px; font-size: 16px; cursor: pointer; width: 100%; }
+        textarea { width: 100%; height: 110px; padding: 14px; border: 1px solid #b3d1e8; border-radius: 8px; font-size: 15px; margin-bottom: 15px; resize: vertical; }
+        button { background: #0f4c81; color: white; border: none; padding: 13px 30px; border-radius: 8px; font-size: 16px; cursor: pointer; width: 100%; font-weight: bold; }
         button:hover { background: #0d3c68; }
         button:disabled { background: #94b8d9; cursor: not-allowed; }
         
-        .result { margin-top: 20px; padding: 15px; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #0f4c81; white-space: pre-wrap; line-height: 1.6; display: none; }
-        .download { margin-top: 15px; padding-top: 15px; border-top: 1px solid #cce0f0; display: none; }
-        .download a { display: inline-block; margin-right: 15px; color: #0f4c81; font-weight: bold; text-decoration: none; }
-        .download a:hover { text-decoration: underline; }
+        /* Kết quả hiển thị */
+        .result-section { margin-top: 25px; display: none; }
+        .result-label { font-weight: bold; color: #0f4c81; margin-bottom: 10px; font-size: 16px; }
+        .result-box { padding: 20px; background: #f8fbff; border-radius: 8px; border-left: 4px solid #0f4c81; white-space: pre-wrap; line-height: 1.7; max-height: 500px; overflow-y: auto; margin-bottom: 20px; }
+        
+        /* Nút tải */
+        .download-box { padding: 15px 20px; background: #f0f9ff; border-radius: 8px; border: 1px solid #cce0f0; display: none; }
+        .download-label { font-weight: bold; color: #0f4c81; margin-bottom: 12px; }
+        .download-buttons { display: flex; gap: 12px; flex-wrap: wrap; }
+        .download-btn { padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-flex; align-items: center; gap: 8px; }
+        .word { background: #e6f2ff; color: #0f4c81; }
+        .excel { background: #e6ffed; color: #166534; }
+        .pdf { background: #ffe6e6; color: #991b1b; }
+        .download-btn:hover { transform: translateY(-2px); box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
     </style>
 </head>
 <body>
@@ -248,21 +271,26 @@ def trang_chu():
         </div>
         <div class="file-info" id="thongTinFile">✅ Đã chọn: <span id="tenFile"></span></div>
         
-        <!-- Ô nhập -->
-        <textarea id="cauhoi" placeholder="Nhập yêu cầu hoặc câu hỏi ở đây..."></textarea>
+        <!-- Ô nhập yêu cầu -->
+        <textarea id="cauhoi" placeholder="Nhập yêu cầu: kiểm tra dữ liệu, sắp xếp A-Z, tính thành tiền, tổng cộng..."></textarea>
         
         <!-- Nút gửi -->
         <button id="nutGui" onclick="gui()">Gửi & Phân tích</button>
         
-        <!-- Kết quả -->
-        <div class="result" id="ketQua"></div>
+        <!-- Kết quả xem trước -->
+        <div class="result-section" id="phanKetQua">
+            <div class="result-label">📋 Kết quả xử lý:</div>
+            <div class="result-box" id="ketQua"></div>
+        </div>
         
-        <!-- Tải file -->
-        <div class="download" id="linkTai">
-            <strong>Tải kết quả:</strong><br>
-            <a id="linkWord" href="#" target="_blank">📄 Word</a>
-            <a id="linkExcel" href="#" target="_blank">📊 Excel</a>
-            <a id="linkPdf" href="#" target="_blank">📕 PDF</a>
+        <!-- Nút tải file -->
+        <div class="download-box" id="khuTaiVe">
+            <div class="download-label">💾 Tải kết quả về máy:</div>
+            <div class="download-buttons">
+                <a id="btnWord" href="#" class="download-btn word" target="_blank">📄 Tải Word</a>
+                <a id="btnExcel" href="#" class="download-btn excel" target="_blank">📊 Tải Excel</a>
+                <a id="btnPdf" href="#" class="download-btn pdf" target="_blank">📕 Tải PDF</a>
+            </div>
         </div>
     </div>
 
@@ -302,19 +330,20 @@ def trang_chu():
         async function gui() {
             const cauhoi = document.getElementById("cauhoi").value.trim();
             const nut = document.getElementById("nutGui");
+            const phanKetQua = document.getElementById("phanKetQua");
             const ketQua = document.getElementById("ketQua");
-            const linkTai = document.getElementById("linkTai");
+            const khuTaiVe = document.getElementById("khuTaiVe");
             
             if (!cauhoi && !fileContent) {
                 alert("Vui lòng nhập yêu cầu hoặc tải file lên!");
                 return;
             }
             
+            // Reset giao diện
             nut.disabled = true;
-            nut.textContent = "Đang xử lý...";
-            ketQua.style.display = "block";
-            ketQua.textContent = "⏳ AI đang phân tích, vui lòng chờ...";
-            linkTai.style.display = "none";
+            nut.textContent = "⏳ Đang xử lý...";
+            phanKetQua.style.display = "none";
+            khuTaiVe.style.display = "none";
             
             try {
                 const res = await fetch("/api/chat", {
@@ -324,15 +353,19 @@ def trang_chu():
                 });
                 const data = await res.json();
                 
+                // Hiển thị kết quả xem trước
                 ketQua.textContent = data.reply || "Không có phản hồi";
+                phanKetQua.style.display = "block";
                 
+                // Hiển thị nút tải
                 if (data.word || data.excel || data.pdf) {
-                    linkTai.style.display = "block";
-                    if (data.word) document.getElementById("linkWord").href = data.word;
-                    if (data.excel) document.getElementById("linkExcel").href = data.excel;
-                    if (data.pdf) document.getElementById("linkPdf").href = data.pdf;
+                    khuTaiVe.style.display = "block";
+                    if (data.word) document.getElementById("btnWord").href = data.word;
+                    if (data.excel) document.getElementById("btnExcel").href = data.excel;
+                    if (data.pdf) document.getElementById("btnPdf").href = data.pdf;
                 }
             } catch (e) {
+                phanKetQua.style.display = "block";
                 ketQua.textContent = "❌ Lỗi kết nối: " + e;
             }
             
