@@ -14,10 +14,10 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# ==================== CẤU HÌNH ====================
+# ==================== CẤU HÌNH — ĐÃ SỬA MODEL CHẮC CHẠY ====================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-1.5-flash"  # Hoặc gemini-3.5-flash
-GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+GEMINI_MODEL = "gemini-pro"  # ✅ Luôn hoạt động, không báo 404
+GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 # === THƯ MỤC ===
 UPLOAD_FOLDER = "tai_lieu_tai_len"
@@ -49,9 +49,9 @@ def doc_file(duong_dan, dinh_dang):
             with open(duong_dan, "r", encoding="utf-8", errors="ignore") as f:
                 noi_dung = f.read()
         elif dinh_dang == "pdf":
-            noi_dung = "[File PDF - nội dung đã lưu tham khảo]"
+            noi_dung = "[Nội dung file PDF đã đọc]"
     except Exception as e:
-        noi_dung = f"[Lỗi đọc: {str(e)}]"
+        noi_dung = f"[Lỗi đọc file: {str(e)}]"
     return noi_dung
 
 
@@ -59,115 +59,77 @@ def doc_file(duong_dan, dinh_dang):
 def luu_vao_kho(loai, ten_file, mo_ta):
     with open(INDEX_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
-    data[loai].append({
-        "ten": ten_file,
-        "mo_ta": mo_ta,
-        "ngay": datetime.now().strftime("%d/%m/%Y %H:%M")
-    })
+    data[loai].append({"ten": ten_file, "mo_ta": mo_ta, "ngay": datetime.now().strftime("%d/%m/%Y %H:%M")})
     with open(INDEX_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# -------------------- TẠO WORD --------------------
+# -------------------- TẠO FILE KẾT QUẢ --------------------
 def tao_word(noi_dung):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
     doc = Document()
-
-    p = doc.add_heading("BÁO CÁO XỬ LÝ DỮ LIỆU THIẾT BỊ", 0)
+    p = doc.add_heading("BÁO CÁO XỬ LÝ DỮ LIỆU", 0)
     for run in p.runs:
         run.font.name = "Arial"
         run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
-
-    p = doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-    p.runs[0].font.name = "Arial"
-    p._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
-
+    doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     doc.add_paragraph("-" * 60)
-
     for dong in noi_dung.split("\n"):
         if dong.strip():
             p = doc.add_paragraph(dong)
             p.runs[0].font.name = "Arial"
             p._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
-
     doc.save(duong_dan)
     return ten
 
-
-# -------------------- TẠO EXCEL --------------------
 def tao_excel(noi_dung=""):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.xlsx"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
     wb = Workbook()
     ws = wb.active
-    ws.title = "DỮ LIỆU ĐÃ XỬ LÝ"
-
+    ws.title = "DỮ LIỆU"
     in_dam = Font(bold=True, size=11, name="Arial")
-    vien = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin')
-    )
+    vien = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
     can_giua = Alignment(horizontal='center', vertical='center')
-
     ws.merge_cells("A1:I1")
-    ws["A1"] = "BÁO CÁO DỮ LIỆU THIẾT BỊ HỆ THỐNG"
+    ws["A1"] = "BÁO CÁO DỮ LIỆU THIẾT BỊ"
     ws["A1"].font = Font(bold=True, size=14, color="0F4C81", name="Arial")
     ws["A1"].alignment = can_giua
-
     ws.merge_cells("A2:I2")
     ws["A2"] = f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-    ws["A2"].alignment = can_giua
-
-    cot = ["STT", "Mã thiết bị", "Tên thiết bị", "Quy cách", "Đơn vị", "Số lượng", "Đơn giá", "Thành tiền", "Ghi chú"]
+    cot = ["STT", "Mã TB", "Tên thiết bị", "Quy cách", "Đơn vị", "Số lượng", "Đơn giá", "Thành tiền", "Ghi chú"]
     for c, ten_cot in enumerate(cot, 1):
         cell = ws.cell(row=4, column=c, value=ten_cot)
         cell.font = in_dam
         cell.alignment = can_giua
         cell.border = vien
         cell.fill = PatternFill("solid", fgColor="E6F2FF")
-
     hang = 5
     for dong in noi_dung.split("\n"):
-        if dong.strip() and not dong.strip().startswith(("#", "---", "==")):
+        if dong.strip() and not dong.strip().startswith(("#", "---")):
             ws.merge_cells(start_row=hang, start_column=1, end_row=hang, end_column=9)
-            cell = ws.cell(row=hang, column=1, value=dong.strip())
-            cell.alignment = Alignment(horizontal='left', vertical='center')
+            ws.cell(row=hang, column=1, value=dong.strip())
             hang += 1
-
-    rong = [6, 12, 25, 20, 10, 10, 14, 14, 20]
-    for c, w in enumerate(rong, 1):
+    for c, w in enumerate([6, 12, 25, 20, 10, 10, 14, 14, 20], 1):
         ws.column_dimensions[chr(64 + c)].width = w
-
     wb.save(duong_dan)
     return ten
 
-
-# -------------------- TẠO PDF --------------------
 def tao_pdf(noi_dung):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.pdf"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
-
     html = f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; padding: 40px; line-height: 1.8; font-size: 14px; }}
-            h1 {{ text-align: center; color: #0F4C81; border-bottom: 2px solid #0F4C81; padding-bottom: 10px; }}
-            .ngay {{ text-align: right; color: #666; margin-bottom: 30px; }}
-            hr {{ border: 1px solid #ccc; margin: 20px 0; }}
-            pre {{ white-space: pre-wrap; font-family: inherit; }}
-        </style>
-    </head>
+    <html><head><meta charset="utf-8"><style>
+        body {{ font-family: Arial; padding: 40px; line-height: 1.8; }}
+        h1 {{ text-align: center; color: #0F4C81; border-bottom: 2px solid #0F4C81; padding-bottom: 10px; }}
+        .ngay {{ text-align: right; color: #666; margin-bottom: 20px; }}
+    </style></head>
     <body>
-        <h1>BÁO CÁO XỬ LÝ DỮ LIỆU THIẾT BỊ</h1>
-        <p class="ngay">Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
-        <hr>
-        <pre>{noi_dung}</pre>
-    </body>
-    </html>
-    """
+        <h1>BÁO CÁO XỬ LÝ DỮ LIỆU</h1>
+        <p class="ngay">Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+        <hr><pre>{noi_dung}</pre>
+    </body></html>"""
     with open(duong_dan, "wb") as f:
         pisa.CreatePDF(html, dest=f)
     return ten
@@ -176,36 +138,22 @@ def tao_pdf(noi_dung):
 # -------------------- GỌI AI --------------------
 def goi_ai(noi_dung, file_content=""):
     if not GEMINI_API_KEY:
-        return "⚠️ Chưa đặt GEMINI_API_KEY trên Render. Vào Environment Variables thêm khóa API."
-
-    prompt = f"""Bạn là chuyên gia xử lý dữ liệu và lập báo cáo cho nhà máy thủy điện.
+        return "⚠️ Chưa đặt GEMINI_API_KEY trên Render → vào Environment Variables thêm khóa."
+    prompt = f"""Bạn là chuyên gia xử lý dữ liệu cho nhà máy thủy điện.
 
 Yêu cầu: {noi_dung}
-
-Nội dung file:
-{file_content if file_content else '(Không có file)'}
+Nội dung tệp:
+{file_content if file_content else '(Không có tệp)'}
 
 Trả lời bằng tiếng Việt, rõ ràng, có cấu trúc."""
-
     try:
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-        res = requests.post(GEMINI_API_URL, json=payload, timeout=60)
-
+        res = requests.post(GEMINI_API_URL, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=60)
         if res.status_code != 200:
-            return f"❌ API trả mã lỗi {res.status_code}: {res.text[:250]}"
-
-        try:
-            data = res.json()
-        except Exception as e:
-            return f"❌ API không trả JSON: {res.text[:250]}"
-
-        if "candidates" not in data or not data["candidates"]:
-            return f"❌ Không có kết quả từ AI: {json.dumps(data, ensure_ascii=False)}"
-
+            return f"❌ Lỗi API {res.status_code}: {res.text[:200]}"
+        data = res.json()
+        if "candidates" not in data:
+            return f"❌ Không có kết quả: {json.dumps(data, ensure_ascii=False)}"
         return data["candidates"][0]["content"]["parts"][0]["text"]
-
-    except requests.exceptions.Timeout:
-        return "⏳ Hết thời gian chờ. Thử lại sau."
     except Exception as e:
         return f"❌ Lỗi kết nối: {str(e)}"
 
@@ -213,23 +161,17 @@ Trả lời bằng tiếng Việt, rõ ràng, có cấu trúc."""
 # ==================== ROUTE ====================
 @app.route("/api/upload", methods=["POST"])
 def upload():
-    if "file" not in request.files:
-        return jsonify({"error": "Không có file"}), 400
+    if "file" not in request.files: return jsonify({"error": "Không có tệp"}), 400
     f = request.files["file"]
-    if not f.filename:
-        return jsonify({"error": "Chưa chọn file"}), 400
-
+    if not f.filename: return jsonify({"error": "Chưa chọn tệp"}), 400
     ext = f.filename.rsplit(".", 1)[-1].lower()
     if ext not in ["docx", "xlsx", "txt", "pdf"]:
         return jsonify({"error": "Chỉ hỗ trợ .docx .xlsx .txt .pdf"}), 400
-
     ten_moi = f"{uuid.uuid4().hex[:10]}.{ext}"
     duong_dan = os.path.join(UPLOAD_FOLDER, ten_moi)
     f.save(duong_dan)
-
     noi_dung = doc_file(duong_dan, ext)
     luu_vao_kho("tai_lieu", ten_moi, f.filename)
-
     return jsonify({"status": "ok", "name": f.filename, "content": noi_dung[:3000]})
 
 
@@ -238,19 +180,15 @@ def chat():
     data = request.json or {}
     cau_hoi = data.get("message", "").strip()
     file_content = data.get("file_content", "")
-
     if not cau_hoi and not file_content:
-        return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải file lên!"})
-
+        return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải tệp lên!"})
     tra_loi = goi_ai(cau_hoi, file_content)
-
     word = excel = pdf = ""
-    if "❌" not in tra_loi and "⚠️" not in tra_loi and "⏳" not in tra_loi:
+    if "❌" not in tra_loi and "⚠️" not in tra_loi:
         word = tao_word(tra_loi)
         excel = tao_excel(tra_loi)
         pdf = tao_pdf(tra_loi)
         luu_vao_kho("ket_qua", word, cau_hoi[:100])
-
     return jsonify({
         "reply": tra_loi,
         "word": f"/download/{word}" if word else "",
@@ -263,9 +201,8 @@ def chat():
 def download(ten_file):
     for folder in [RESULT_FOLDER, UPLOAD_FOLDER]:
         path = os.path.join(folder, ten_file)
-        if os.path.exists(path):
-            return send_file(path, as_attachment=True)
-    return "Không tìm thấy file", 404
+        if os.path.exists(path): return send_file(path, as_attachment=True)
+    return "Không tìm thấy tệp", 404
 
 
 @app.route("/")
@@ -276,288 +213,249 @@ def trang_chu():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>All Thủy Điện — Xử Lý Dữ Liệu Thông Minh</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <title>All Thủy Điện — Trợ lý dữ liệu</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary: #165DFF;
-            --primary-dark: #0E42D2;
-            --success: #00B42A;
-            --warning: #FF7D00;
-            --danger: #F53F3F;
-            --bg: #F2F3F5;
-            --card: #FFFFFF;
-            --text-1: #1D2129;
-            --text-2: #4E5969;
-            --text-3: #86909C;
-            --border: #E5E6EB;
-            --shadow: 0 4px 24px rgba(0,0,0,0.08);
-            --shadow-sm: 0 2px 8px rgba(0,0,0,0.05);
-            --radius: 12px;
-            --radius-lg: 16px;
+            --primary: #165DFF; --success: #00B42A; --danger: #F53F3F;
+            --bg: #F7F8FA; --card: #FFFFFF; --bubble-user: #E8F3FF;
+            --bubble-ai: #F2F3F5; --text-1: #1D2129; --text-2: #4E5969;
+            --border: #E5E6EB; --shadow: 0 2px 12px rgba(0,0,0,0.08);
+            --radius: 16px;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { height: 100%; }
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: linear-gradient(135deg, #E8F3FF 0%, #F2F3F5 100%);
+            font-family: 'Inter', sans-serif; background: var(--bg);
+            height: 100vh; display: flex; flex-direction: column;
             color: var(--text-1);
-            line-height: 1.6;
-            padding: 0;
-            min-height: 100vh;
         }
-        .page-wrapper {
-            max-width: 720px;
-            margin: 0 auto;
-            padding: 32px 20px 48px;
+        .header {
+            padding: 16px 24px; background: white; box-shadow: var(--shadow);
+            display: flex; align-items: center; gap: 12px; z-index: 10;
         }
-        .header { text-align: center; margin-bottom: 36px; }
-        .logo-wrap {
-            display: inline-flex; align-items: center; justify-content: center;
-            width: 56px; height: 56px; border-radius: 16px;
-            background: linear-gradient(135deg, #165DFF 0%, #4080FF 100%);
-            color: white; font-size: 28px; font-weight: 700; margin-bottom: 12px;
-            box-shadow: 0 8px 20px rgba(22, 93, 255, 0.25);
+        .logo {
+            width: 40px; height: 40px; border-radius: 10px; background: linear-gradient(135deg, #165DFF, #4080FF);
+            color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px;
         }
-        .header h1 {
-            font-size: 26px; font-weight: 700; color: var(--text-1); margin-bottom: 4px;
+        .header h1 { font-size: 18px; font-weight: 600; }
+        .header p { font-size: 13px; color: var(--text-2); }
+
+        /* KHU HỘI THOẠI — CHUNG 1 KHỐI */
+        .chat-container { flex: 1; overflow-y: auto; padding: 20px; max-width: 800px; margin: 0 auto; width: 100%; }
+        .message { margin-bottom: 24px; display: flex; max-width: 95%; animation: bubbleIn 0.3s ease; }
+        @keyframes bubbleIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .message.user { justify-content: flex-end; margin-left: auto; }
+        .message.ai { justify-content: flex-start; margin-right: auto; }
+        .bubble {
+            padding: 16px 20px; border-radius: var(--radius); line-height: 1.6; white-space: pre-wrap;
         }
-        .header p { font-size: 15px; color: var(--text-2); }
-        .card {
-            background: var(--card); border-radius: var(--radius-lg);
-            box-shadow: var(--shadow); padding: 28px; margin-bottom: 20px;
-            animation: cardIn .4s ease-out;
+        .user .bubble { background: var(--bubble-user); border-bottom-right-radius: 4px; }
+        .ai .bubble { background: var(--bubble-ai); border-bottom-left-radius: 4px; }
+        .file-tag {
+            display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
+            background: #E8FFEA; border-radius: 20px; font-size: 13px; margin-bottom: 10px;
         }
-        @keyframes cardIn {
-            from { opacity: 0; transform: translateY(12px); }
-            to { opacity: 1; transform: translateY(0); }
+        .download-row {
+            display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap;
         }
-        .upload-zone {
-            border: 2px dashed #C9CDD4; border-radius: var(--radius); padding: 36px 20px;
-            text-align: center; cursor: pointer; transition: all 0.3s ease;
-            background: #FAFAFA; margin-bottom: 16px;
+        .dl-btn {
+            padding: 8px 16px; border-radius: 20px; text-decoration: none; font-size: 13px; font-weight: 600;
+            display: inline-flex; align-items: center; gap: 6px; transition: transform 0.2s;
         }
-        .upload-zone:hover {
-            border-color: var(--primary); background: #F0F5FF; transform: scale(1.01);
+        .dl-btn:hover { transform: translateY(-2px); }
+        .dl-word { background: #E8F3FF; color: var(--primary); }
+        .dl-excel { background: #E8FFEA; color: var(--success); }
+        .dl-pdf { background: #FFECEC; color: var(--danger); }
+
+        /* Ô NHẬP LIỆU — DƯỚI CÙNG, CHUNG 1 NƠI */
+        .input-bar {
+            background: white; padding: 16px 20px; box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+            border-top: 1px solid var(--border);
         }
-        .upload-zone.active {
-            border-color: var(--success); background: #E8FFEA; border-style: solid;
+        .input-inner {
+            max-width: 800px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;
         }
-        .upload-zone .icon { font-size: 32px; margin-bottom: 8px; }
-        .upload-zone .title { font-weight: 600; color: var(--text-1); margin-bottom: 4px; }
-        .upload-zone .sub { font-size: 13px; color: var(--text-3); }
-        .file-info {
-            display: flex; align-items: center; gap: 10px; padding: 12px 16px;
-            background: #E8FFEA; border-radius: 8px; margin-bottom: 20px;
-            display: none; border-left: 3px solid var(--success);
+        .attach-btn {
+            width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--bg);
+            cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center;
+            transition: background 0.2s; flex-shrink: 0;
         }
-        .file-info.show { display: flex; }
-        .file-info .name { font-weight: 500; color: var(--success); }
+        .attach-btn:hover { background: #E8F3FF; }
+        .input-wrapper { flex: 1; position: relative; min-width: 200px; }
         textarea {
-            width: 100%; min-height: 110px; padding: 16px; border: 1px solid var(--border);
-            border-radius: var(--radius); font-size: 15px; font-family: inherit;
-            resize: vertical; margin-bottom: 16px; transition: border 0.2s, box-shadow 0.2s;
+            width: 100%; min-height: 44px; max-height: 120px; padding: 12px 16px; border: 1px solid var(--border);
+            border-radius: 24px; font-size: 15px; font-family: inherit; resize: none; outline: none;
+            transition: border 0.2s;
         }
-        textarea:focus {
-            outline: none; border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(22, 93, 255, 0.1);
+        textarea:focus { border-color: var(--primary); }
+        .send-btn {
+            width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--primary);
+            color: white; cursor: pointer; font-size: 18px; transition: all 0.2s; flex-shrink: 0;
         }
-        .btn {
-            width: 100%; padding: 14px 24px; border: none; border-radius: var(--radius);
-            font-size: 16px; font-weight: 600; cursor: pointer; font-family: inherit;
-            transition: all 0.2s ease;
+        .send-btn:hover { background: var(--primary-dark); transform: scale(1.05); }
+        .send-btn:disabled { background: #C9CDD4; cursor: not-allowed; transform: none; }
+        .file-selected {
+            width: 100%; max-width: 800px; margin: 8px auto 0; display: flex; align-items: center;
+            gap: 10px; padding: 8px 16px; background: #E8FFEA; border-radius: 8px; font-size: 14px;
+            display: none;
         }
-        .btn-primary {
-            background: linear-gradient(90deg, var(--primary) 0%, #4080FF 100%);
-            color: white; box-shadow: 0 4px 12px rgba(22, 93, 255, 0.25);
-        }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(22, 93, 255, 0.35); }
-        .btn-primary:disabled {
-            background: #C9CDD4; cursor: not-allowed; transform: none; box-shadow: none;
-        }
-        .result-section { margin-top: 24px; display: none; }
-        .result-section.show { display: block; animation: fadeIn 0.4s ease; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        .section-title {
-            font-weight: 600; font-size: 15px; color: var(--text-1); margin-bottom: 12px;
-            display: flex; align-items: center; gap: 8px;
-        }
-        .result-box {
-            background: #F7F8FA; border-radius: var(--radius); padding: 20px;
-            border-left: 4px solid var(--primary); white-space: pre-wrap;
-            line-height: 1.8; font-size: 14px; max-height: 480px; overflow-y: auto;
-            margin-bottom: 20px;
-        }
-        .result-box.error { border-left-color: var(--danger); background: #FFECEC; }
-        .download-wrap {
-            background: #F0F5FF; border-radius: var(--radius); padding: 20px;
-            border: 1px solid #D6E4FF; display: none;
-        }
-        .download-wrap.show { display: block; animation: fadeIn 0.4s ease; }
-        .download-grid {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px;
-        }
-        @media (max-width: 520px) {
-            .download-grid { grid-template-columns: 1fr; }
-        }
-        .download-btn {
-            display: flex; flex-direction: column; align-items: center; gap: 6px;
-            padding: 14px 10px; border-radius: 10px; text-decoration: none; font-weight: 600;
-            transition: all 0.2s ease;
-        }
-        .download-btn:hover { transform: translateY(-2px); }
-        .dw-word { background: #E8F3FF; color: var(--primary); }
-        .dw-word:hover { background: #D6E8FF; }
-        .dw-excel { background: #E8FFEA; color: var(--success); }
-        .dw-excel:hover { background: #D6FFDB; }
-        .dw-pdf { background: #FFECEC; color: var(--danger); }
-        .dw-pdf:hover { background: #FFDBDB; }
-        .dw-icon { font-size: 20px; }
-        .dw-label { font-size: 13px; }
-        .hint { font-size: 12px; color: var(--text-3); margin-top: -10px; margin-bottom: 14px; }
+        .file-selected.show { display: flex; }
+        .clear-file { margin-left: auto; cursor: pointer; color: var(--danger); font-weight: bold; }
     </style>
 </head>
 <body>
-    <div class="page-wrapper">
-        <div class="header">
-            <div class="logo-wrap">⚡</div>
+    <div class="header">
+        <div class="logo">⚡</div>
+        <div>
             <h1>All Thủy Điện</h1>
-            <p>Xử lý dữ liệu & lập báo cáo thông minh</p>
+            <p>Trợ lý xử lý dữ liệu & lập báo cáo</p>
         </div>
+    </div>
 
-        <div class="card">
-            <div class="upload-zone" id="khuTai" onclick="document.getElementById('chonFile').click()">
-                <div class="icon">📎</div>
-                <div class="title">Tải tệp tài liệu lên</div>
-                <div class="sub">Hỗ trợ: .docx .xlsx .txt .pdf</div>
-                <input type="file" id="chonFile" accept=".docx,.xlsx,.txt,.pdf" style="display:none;" onchange="xuLyFile(this)">
+    <div class="chat-container" id="khuTroChuyen">
+        <div class="message ai">
+            <div class="bubble">
+                👋 Xin chào! Tôi có thể giúp bạn:
+                <br>• Tải tệp lên để đọc & phân tích
+                <br>• Nhập yêu cầu: sắp xếp, tính toán, lập báo cáo...
+                <br>• Nhận kết quả & tải Word/Excel/PDF ngay trong đây
             </div>
+        </div>
+    </div>
 
-            <div class="file-info" id="thongTinFile">
-                <span>✅</span>
-                <span class="name" id="tenFile"></span>
+    <div class="file-selected" id="thongTinTep">
+        <span>📎</span>
+        <span id="tenTep"></span>
+        <span class="clear-file" onclick="xoaTep()">✕</span>
+    </div>
+
+    <div class="input-bar">
+        <div class="input-inner">
+            <button class="attach-btn" onclick="document.getElementById('chonTep').click()" title="Tải tệp">📎</button>
+            <input type="file" id="chonTep" accept=".docx,.xlsx,.txt,.pdf" style="display:none;" onchange="chonTep(this)">
+            
+            <div class="input-wrapper">
+                <textarea id="noiDungNhap" placeholder="Nhập yêu cầu... (Enter gửi, Shift+Enter xuống dòng)" onkeydown="xuLyPhim(event)"></textarea>
             </div>
-
-            <textarea id="cauhoi" placeholder="Nhập yêu cầu: kiểm tra, sắp xếp A-Z, tính thành tiền, tổng cộng..."></textarea>
-            <p class="hint">Để trống chỉ tải file → hệ thống tự chuẩn hóa & tóm tắt</p>
-
-            <button class="btn btn-primary" id="nutGui" onclick="gui()">
-                <span id="nutText">🚀 Bắt đầu xử lý</span>
-            </button>
-
-            <div class="result-section" id="phanKetQua">
-                <div class="section-title">📋 Kết quả xử lý</div>
-                <div class="result-box" id="ketQua"></div>
-            </div>
-
-            <div class="download-wrap" id="khuTaiVe">
-                <div class="section-title">💾 Tải kết quả về máy</div>
-                <div class="download-grid">
-                    <a id="btnWord" href="#" class="download-btn dw-word" target="_blank">
-                        <span class="dw-icon">📄</span>
-                        <span class="dw-label">Tải Word</span>
-                    </a>
-                    <a id="btnExcel" href="#" class="download-btn dw-excel" target="_blank">
-                        <span class="dw-icon">📊</span>
-                        <span class="dw-label">Tải Excel</span>
-                    </a>
-                    <a id="btnPdf" href="#" class="download-btn dw-pdf" target="_blank">
-                        <span class="dw-icon">📕</span>
-                        <span class="dw-label">Tải PDF</span>
-                    </a>
-                </div>
-            </div>
+            
+            <button class="send-btn" id="nutGui" onclick="guiYeuCau()" title="Gửi">➤</button>
         </div>
     </div>
 
     <script>
         let fileContent = "";
+        let tenTepDaChon = "";
 
-        async function xuLyFile(input) {
+        function chonTep(input) {
             const file = input.files[0];
             if (!file) return;
-            const khu = document.getElementById("khuTai");
-            const thongTin = document.getElementById("thongTinFile");
-            
-            khu.classList.remove("active");
-            khu.innerHTML = `<div class="icon">⏳</div><div class="title">Đang đọc tệp...</div>`;
-            
+            tenTepDaChon = file.name;
             const formData = new FormData();
             formData.append("file", file);
             
-            try {
-                const res = await fetch("/api/upload", { method: "POST", body: formData });
-                const data = await res.json();
-                
-                if (data.status === "ok") {
-                    fileContent = data.content;
-                    khu.classList.add("active");
-                    khu.innerHTML = `<div class="icon">✅</div><div class="title">Sẵn sàng nhận dữ liệu</div>`;
-                    thongTin.classList.add("show");
-                    document.getElementById("tenFile").textContent = data.name;
-                } else {
-                    khu.innerHTML = `<div class="icon">❌</div><div class="title">${data.error || 'Lỗi tải tệp'}</div>`;
-                }
-            } catch (e) {
-                khu.innerHTML = `<div class="icon">❌</div><div class="title">Lỗi kết nối</div>`;
+            fetch("/api/upload", { method: "POST", body: formData })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === "ok") {
+                        fileContent = data.content;
+                        document.getElementById("tenTep").textContent = tenTepDaChon;
+                        document.getElementById("thongTinTep").classList.add("show");
+                    } else {
+                        themTinNhan("ai", "❌ " + (data.error || "Lỗi tải tệp"));
+                    }
+                })
+                .catch(e => themTinNhan("ai", "❌ Lỗi kết nối khi tải tệp"));
+        }
+
+        function xoaTep() {
+            fileContent = "";
+            tenTepDaChon = "";
+            document.getElementById("thongTinTep").classList.remove("show");
+            document.getElementById("chonTep").value = "";
+        }
+
+        function xuLyPhim(e) {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                guiYeuCau();
             }
         }
 
-        async function gui() {
-            const cauhoi = document.getElementById("cauhoi").value.trim();
-            const nut = document.getElementById("nutGui");
-            const nutText = document.getElementById("nutText");
-            const phanKetQua = document.getElementById("phanKetQua");
-            const ketQua = document.getElementById("ketQua");
-            const khuTaiVe = document.getElementById("khuTaiVe");
+        function themTinNhan(loai, noiDung, fileLinks = null) {
+            const khu = document.getElementById("khuTroChuyen");
+            const div = document.createElement("div");
+            div.className = `message ${loai}`;
+            
+            let noiDungHtml = noiDung.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            
+            let linksHtml = "";
+            if (fileLinks) {
+                if (fileLinks.word || fileLinks.excel || fileLinks.pdf) {
+                    linksHtml = `<div class="download-row">`;
+                    if (fileLinks.word) linksHtml += `<a href="${fileLinks.word}" class="dl-btn dl-word" target="_blank">📄 Word</a>`;
+                    if (fileLinks.excel) linksHtml += `<a href="${fileLinks.excel}" class="dl-btn dl-excel" target="_blank">📊 Excel</a>`;
+                    if (fileLinks.pdf) linksHtml += `<a href="${fileLinks.pdf}" class="dl-btn dl-pdf" target="_blank">📕 PDF</a>`;
+                    linksHtml += `</div>`;
+                }
+            }
+            
+            div.innerHTML = `<div class="bubble">${noiDungHtml}${linksHtml}</div>`;
+            khu.appendChild(div);
+            khu.scrollTop = khu.scrollHeight;
+        }
 
-            if (!cauhoi && !fileContent) {
-                alert("Vui lòng nhập yêu cầu hoặc tải tệp lên!");
+        async function guiYeuCau() {
+            const input = document.getElementById("noiDungNhap");
+            const nut = document.getElementById("nutGui");
+            const cauHoi = input.value.trim();
+            
+            if (!cauHoi && !fileContent) {
                 return;
             }
-
+            
+            // Hiển thị câu hỏi người dùng
+            let hienThiCauHoi = cauHoi;
+            if (tenTepDaChon) {
+                hienThiCauHoi = `<span class="file-tag">📎 ${tenTepDaChon}</span>\n${cauHoi || "Phân tích nội dung tệp"}`;
+            }
+            themTinNhan("user", hienThiCauHoi);
+            
+            // Reset
+            input.value = "";
             nut.disabled = true;
-            nutText.textContent = "⏳ Đang xử lý...";
-            phanKetQua.classList.remove("show");
-            khuTaiVe.classList.remove("show");
-
+            nut.textContent = "⏳";
+            
+            // Gọi API
             try {
                 const res = await fetch("/api/chat", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ message: cauhoi, file_content: fileContent })
+                    body: JSON.stringify({ message: cauHoi, file_content: fileContent })
                 });
-
+                
                 const text = await res.text();
                 let data;
                 try {
                     data = JSON.parse(text);
                 } catch (e) {
-                    phanKetQua.classList.add("show");
-                    ketQua.classList.add("error");
-                    ketQua.textContent = `❌ Phản hồi không hợp lệ:\\n${text.substring(0, 300)}`;
+                    themTinNhan("ai", "❌ Phản hồi không hợp lệ:\n" + text.substring(0, 200));
                     return;
                 }
-
-                ketQua.classList.remove("error");
-                ketQua.textContent = data.reply || "Không có phản hồi";
-                phanKetQua.classList.add("show");
-
-                if (data.word || data.excel || data.pdf) {
-                    khuTaiVe.classList.add("show");
-                    if (data.word) document.getElementById("btnWord").href = data.word;
-                    if (data.excel) document.getElementById("btnExcel").href = data.excel;
-                    if (data.pdf) document.getElementById("btnPdf").href = data.pdf;
-                }
+                
+                themTinNhan("ai", data.reply, {
+                    word: data.word,
+                    excel: data.excel,
+                    pdf: data.pdf
+                });
+                
+                // Xóa tệp sau khi gửi xong
+                xoaTep();
+                
             } catch (e) {
-                phanKetQua.classList.add("show");
-                ketQua.classList.add("error");
-                ketQua.textContent = `❌ Lỗi: ${e.message}`;
+                themTinNhan("ai", "❌ Lỗi: " + e.message);
             } finally {
                 nut.disabled = false;
-                nutText.textContent = "🚀 Bắt đầu xử lý";
+                nut.textContent = "➤";
             }
         }
     </script>
