@@ -12,12 +12,12 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# ==================== CẤU HÌNH — LẤY TỪ BIẾN MÔI TRƯỜNG ====================
+# ==================== CẤU HÌNH BIẾN MÔI TRƯỜNG ====================
 HUGGINGFACE_TOKEN = os.environ.get("HUGGINGFACE_TOKEN", "")
 ZALO_BOT_TOKEN = os.environ.get("ZALO_BOT_TOKEN", "")
 FB_PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN", "")
 FB_VERIFY_TOKEN = os.environ.get("FB_VERIFY_TOKEN", "baocao_ai_2026")
-# ============================================================================
+# ====================================================================
 
 THU_MUC_FILES = "generated_files"
 os.makedirs(THU_MUC_FILES, exist_ok=True)
@@ -118,7 +118,7 @@ Trả lời:"""
             return f"❌ Lỗi API: Mã {response.status_code} - {response.text[:200]}"
             
     except Exception as e:
-        return f"❌ Lỗi hệ thống: {str(e)}. Vui lòng thử lại sau ít phút."
+        return f"❌ Lỗi kết nối AI: {str(e)}\n\n💡 Nếu lỗi vẫn xảy ra, ta có thể chuyển sang dùng Google Gemini miễn phí."
 
 
 # -------------------- WEBHOOK ZALO --------------------
@@ -158,7 +158,6 @@ def web_chat():
     
     phan_hoi = goi_ai(noi_dung)
     
-    # Tạo file đính kèm
     word_link = ""
     excel_link = ""
     pdf_link = ""
@@ -203,7 +202,6 @@ def trang_chu():
             .tai { margin-top: 15px; }
             .tai a { display: inline-block; margin-right: 15px; color: #2563eb; text-decoration: none; font-weight: bold; }
             .tai a:hover { text-decoration: underline; }
-            .dangxuat { color: #64748b; margin-top: 10px; font-size: 14px; }
         </style>
     </head>
     <body>
@@ -246,8 +244,8 @@ def trang_chu():
                 if (data.word || data.excel || data.pdf) {
                     tai.style.display = "block";
                     let html = "<strong>Tải file:</strong> ";
-                    if (data.word) html += `<a href="${data.word}" target="_blank">Word</a>`;
-                    if (data.excel) html += `<a href="${data.excel}" target="_blank">Excel</a>`;
+                    if (data.word) html += `<a href="${data.word}" target="_blank">Word</a> `;
+                    if (data.excel) html += `<a href="${data.excel}" target="_blank">Excel</a> `;
                     if (data.pdf) html += `<a href="${data.pdf}" target="_blank">PDF</a>`;
                     tai.innerHTML = html;
                 }
