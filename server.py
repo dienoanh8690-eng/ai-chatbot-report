@@ -14,9 +14,9 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# ==================== CẤU HÌNH ĐÃ SỬA LỖI 404 ====================
+# ==================== CẤU HÌNH ĐÚNG THEO LỜI KHUYÊN GOOGLE ====================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-2.0-flash"  # ← ĐÃ ĐỔI TÊN MÔ HÌNH MỚI
+GEMINI_MODEL = "gemini-3.5-flash"  # ✅ Đúng theo thông báo lỗi của Google
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 # === THƯ MỤC ===
@@ -135,7 +135,7 @@ def tao_pdf(noi_dung):
     return ten
 
 
-# -------------------- GỌI AI CHUNG --------------------
+# -------------------- GỌI AI --------------------
 def goi_ai(noi_dung, file_content="", he_thong=""):
     if not GEMINI_API_KEY:
         return "⚠️ Chưa đặt GEMINI_API_KEY trên Render → vào Environment Variables thêm khóa."
@@ -247,7 +247,7 @@ def trang_chu():
         .header h1 { font-size: 18px; font-weight: 600; }
         .header p { font-size: 13px; color: var(--text-2); }
 
-        /* Thanh quy trình */
+        /* Thanh quy trình — Đổi "Tải tệp" thành "Đăng nhập" */
         .process-bar {
             background: white; padding: 12px 24px; border-bottom: 1px solid var(--border);
             display: flex; justify-content: space-between; align-items: center;
@@ -377,7 +377,7 @@ def trang_chu():
     <div class="process-bar">
         <div class="process-step">
             <div class="step-number active" id="buoc1">1</div>
-            <div class="step-text active" id="t1">Tải tệp</div>
+            <div class="step-text active" id="t1">Đăng nhập</div>
         </div>
         <div class="process-step">
             <div class="step-number" id="buoc2">2</div>
@@ -421,7 +421,7 @@ def trang_chu():
             <div class="chat-box" id="khuBaoCao">
                 <div class="message ai">
                     <div class="bubble">
-                        👋 Tải tệp lên hoặc chọn yêu cầu nhanh để bắt đầu xử lý dữ liệu và lập báo cáo.
+                        👋 Đăng nhập → tải tệp lên hoặc chọn yêu cầu nhanh để bắt đầu xử lý dữ liệu và lập báo cáo.
                     </div>
                 </div>
             </div>
