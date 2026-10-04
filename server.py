@@ -6,42 +6,48 @@ import json
 from datetime import datetime
 from docx import Document
 from docx.oxml.ns import qn
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl import Workbook
 from xhtml2pdf import pisa
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-# ==================== CẤU HÌNH BIẾN MÔI TRƯỜNG ====================
-# Gemini — ưu tiên chính
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+# ==================== CẤU HÌNH TẤT CẢ KEY ====================
+# Gemini
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = "gemini-2.0-flash-exp"
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
-# Groq / Llama 3 (META) — miễn phí, tốc độ nhanh
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+# OpenAI / GPT
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_MODEL = "gpt-3.5-turbo"
+
+# Claude
+CLAUDE_API_KEY = os.environ.get("CLAUDE", "").strip()
+CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
+
+# Groq / Llama 3 (META)
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
-# OpenAI GPT
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_MODEL = "gpt-3.5-turbo"
+# DOLA / OpenRouter
+DOLA_API_KEY = os.environ.get("DOLA", "").strip()
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER", "").strip() or DOLA_API_KEY
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODEL = "meta-llama/llama-3-70b-instruct"
 
 UPLOAD_FOLDER = "tai_lieu_tai_len"
 RESULT_FOLDER = "ket_qua_xuat_ra"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(RESULT_FOLDER, exist_ok())
+os.makedirs(RESULT_FOLDER, exist_ok=True)
 
-# Lưu trạng thái Google Sheets
-sheets_state = {}
-
-# ==================== GỌI DỊCH VỤ AI ====================
+# ==================== HÀM GỌI TỪNG AI ====================
 def goi_gemini(prompt, file_content="", he_thong=""):
     if not GEMINI_API_KEY:
-        return "⚠️ Chưa đặt GEMINI_API_KEY trên Render → vào Environment thêm khóa từ aistudio.google.com/apikey"
+        return None, "⚠️ Chưa đặt GEMINI_API_KEY"
     full_prompt = f"""{he_thong or "Trả lời bằng tiếng Việt rõ ràng, có cấu trúc."}
 
 Yêu cầu: {prompt}
@@ -51,46 +57,21 @@ Nội dung tham khảo:
         res = requests.post(
             GEMINI_API_URL,
             json={"contents": [{"parts": [{"text": full_prompt}]}]},
-            timeout=120
+            timeout=90
         )
         if res.status_code == 429:
-            return "⚠️ Gemini hết quota → tạo khóa mới tại aistudio.google.com/apikey"
+            return None, "⚠️ Gemini hết quota"
         if res.status_code != 200:
-            return f"❌ Lỗi Gemini {res.status_code}"
+            return None, f"❌ Lỗi Gemini {res.status_code}"
         data = res.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        return data["candidates"][0]["content"]["parts"][0]["text"], None
     except Exception as e:
-        return f"❌ Lỗi kết nối Gemini: {str(e)}"
-
-
-def goi_groq(prompt, he_thong=""):
-    if not GROQ_API_KEY:
-        return "⚠️ Chưa đặt GROQ_API_KEY → lấy tại console.groq.com/keys"
-    try:
-        res = requests.post(
-            GROQ_API_URL,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": GROQ_MODEL,
-                "messages": [
-                    {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt, rõ ràng, dễ hiểu."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 4000
-            },
-            timeout=120
-        )
-        if res.status_code != 200:
-            return f"❌ Lỗi Groq {res.status_code}"
-        return res.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f"❌ Lỗi kết nối Groq: {str(e)}"
+        return None, f"❌ Lỗi kết nối Gemini: {str(e)}"
 
 
 def goi_gpt(prompt, he_thong=""):
     if not OPENAI_API_KEY:
-        return "⚠️ Chưa đặt OPENAI_API_KEY → lấy tại platform.openai.com/api-keys"
+        return None, "⚠️ Chưa đặt OPENAI_API_KEY"
     try:
         res = requests.post(
             OPENAI_API_URL,
@@ -98,83 +79,182 @@ def goi_gpt(prompt, he_thong=""):
             json={
                 "model": OPENAI_MODEL,
                 "messages": [
-                    {"role": "system", "content": he_thong or "Bạn là chuyên gia soạn thảo văn bản, viết chuẩn mực, rõ ràng."},
+                    {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt."},
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": 0.7
             },
-            timeout=120
+            timeout=90
         )
         if res.status_code != 200:
-            return f"❌ Lỗi GPT {res.status_code}"
-        return res.json()["choices"][0]["message"]["content"]
+            return None, f"❌ Lỗi GPT {res.status_code}"
+        return res.json()["choices"][0]["message"]["content"], None
     except Exception as e:
-        return f"❌ Lỗi kết nối GPT: {str(e)}"
+        return None, f"❌ Lỗi kết nối GPT: {str(e)}"
+
+
+def goi_claude(prompt, he_thong=""):
+    if not CLAUDE_API_KEY:
+        return None, "⚠️ Chưa đặt CLAUDE"
+    try:
+        res = requests.post(
+            CLAUDE_API_URL,
+            headers={
+                "x-api-key": CLAUDE_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "claude-3-5-sonnet-20241022",
+                "max_tokens": 4000,
+                "system": he_thong or "Trả lời bằng tiếng Việt, rõ ràng, chuẩn mực.",
+                "messages": [{"role": "user", "content": prompt}]
+            },
+            timeout=90
+        )
+        if res.status_code != 200:
+            return None, f"❌ Lỗi Claude {res.status_code}"
+        return res.json()["content"][0]["text"], None
+    except Exception as e:
+        return None, f"❌ Lỗi kết nối Claude: {str(e)}"
+
+
+def goi_groq(prompt, he_thong=""):
+    if not GROQ_API_KEY:
+        return None, "⚠️ Chưa đặt GROQ_API_KEY"
+    try:
+        res = requests.post(
+            GROQ_API_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": GROQ_MODEL,
+                "messages": [
+                    {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 4000
+            },
+            timeout=90
+        )
+        if res.status_code != 200:
+            return None, f"❌ Lỗi Groq {res.status_code}"
+        return res.json()["choices"][0]["message"]["content"], None
+    except Exception as e:
+        return None, f"❌ Lỗi kết nối Groq: {str(e)}"
+
+
+def goi_dola(prompt, he_thong=""):
+    if not OPENROUTER_API_KEY:
+        return None, "⚠️ Chưa đặt DOLA/OPENROUTER"
+    try:
+        res = requests.post(
+            OPENROUTER_URL,
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": OPENROUTER_MODEL,
+                "messages": [
+                    {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 4000
+            },
+            timeout=90
+        )
+        if res.status_code != 200:
+            return None, f"❌ Lỗi DOLA {res.status_code}"
+        return res.json()["choices"][0]["message"]["content"], None
+    except Exception as e:
+        return None, f"❌ Lỗi kết nối DOLA: {str(e)}"
+
+
+# ==================== CHUYỂN ĐỔI TỰ ĐỘNG ====================
+def goi_voi_danh_sach(prompt, danh_sach_ai, he_thong=""):
+    """Thử lần lượt từng AI cho đến khi thành công"""
+    for ten, ham in danh_sach_ai:
+        ket_qua, loi = ham(prompt, he_thong=he_thong)
+        if ket_qua:
+            return f"[{ten}] {ket_qua}"
+    return f"❌ Tất cả AI đều không hoạt động:\n{loi}"
 
 
 # ==================== XỬ LÝ GOOGLE SHEETS ====================
 def doc_google_sheet(sheet_url):
     try:
-        # Trích xuất ID từ URL
         if "docs.google.com/spreadsheets/d/" not in sheet_url:
-            return None, "❌ Link Google Sheets không đúng định dạng"
+            return None, "❌ Link không đúng định dạng Google Sheets"
         sheet_id = sheet_url.split("/d/")[1].split("/")[0]
-        # Sử dụng export CSV để đọc nhanh, không cần OAuth phức tạp
         csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
         res = requests.get(csv_url, timeout=30)
-        if res.status_code != 200:
-            return None, "❌ Không đọc được Sheet → Kiểm tra quyền truy cập: Chia sẻ thành 'Bất kỳ ai có link'"
-        return res.text, None
+        if res.status_code == 200:
+            return res.text, None
+        return None, f"❌ Không đọc được Sheet → Kiểm tra chia sẻ: Bất kỳ ai có link"
     except Exception as e:
         return None, f"❌ Lỗi đọc Sheet: {str(e)}"
 
 
 # ==================== TẠO TỆP BÁO CÁO ====================
 def tao_word(noi_dung):
-    ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
-    duong_dan = os.path.join(RESULT_FOLDER, ten)
-    doc = Document()
-    p = doc.add_heading("BÁO CÁO", 0)
-    for run in p.runs:
-        run.font.name = "Arial"
-        run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
-    doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-    doc.add_paragraph("-" * 60)
-    for dong in noi_dung.split("\n"):
-        if dong.strip():
-            p = doc.add_paragraph(dong.strip())
-            for run in p.runs:
-                run.font.name = "Arial"
-                run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
-    doc.save(duong_dan)
-    return ten
+    try:
+        ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
+        duong_dan = os.path.join(RESULT_FOLDER, ten)
+        doc = Document()
+        p = doc.add_heading("BÁO CÁO", 0)
+        for run in p.runs:
+            run.font.name = "Arial"
+            run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+        doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+        doc.add_paragraph("-" * 60)
+        for dong in noi_dung.split("\n"):
+            if dong.strip():
+                p = doc.add_paragraph(dong.strip())
+                for run in p.runs:
+                    run.font.name = "Arial"
+                    run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+        doc.save(duong_dan)
+        return ten
+    except:
+        return ""
 
 def tao_excel(noi_dung=""):
-    ten = f"bao_cao_{uuid.uuid4().hex[:8]}.xlsx"
-    duong_dan = os.path.join(RESULT_FOLDER, ten)
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "BÁO CÁO"
-    ws["A1"] = f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-    hang = 3
-    for dong in noi_dung.split("\n"):
-        if dong.strip():
-            ws.cell(row=hang, column=1, value=dong.strip())
-            hang += 1
-    wb.save(duong_dan)
-    return ten
+    try:
+        ten = f"bao_cao_{uuid.uuid4().hex[:8]}.xlsx"
+        duong_dan = os.path.join(RESULT_FOLDER, ten)
+        from openpyxl.styles import Font
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "BÁO CÁO"
+        ws["A1"] = f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        hang = 3
+        for dong in noi_dung.split("\n"):
+            if dong.strip():
+                ws.cell(row=hang, column=1, value=dong.strip())
+                hang += 1
+        wb.save(duong_dan)
+        return ten
+    except:
+        return ""
 
 def tao_pdf(noi_dung):
-    ten = f"bao_cao_{uuid.uuid4().hex[:8]}.pdf"
-    duong_dan = os.path.join(RESULT_FOLDER, ten)
-    html = f"""<html><head><meta charset="utf-8"><style>
-    body {{ font-family: Arial; padding: 30px; line-height: 1.6; }}
-    h1 {{ text-align: center; color: #0F4C81; }}
-    </style></head>
-    <body><h1>BÁO CÁO</h1><p>Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p><hr><pre>{noi_dung[:6000]}</pre></body></html>"""
-    with open(duong_dan, "wb") as f:
-        pisa.CreatePDF(html, dest=f)
-    return ten
+    try:
+        ten = f"bao_cao_{uuid.uuid4().hex[:8]}.pdf"
+        duong_dan = os.path.join(RESULT_FOLDER, ten)
+        html = f"""<html><head><meta charset="utf-8"><style>
+        body {{ font-family: Arial; padding: 30px; line-height: 1.6; }}
+        h1 {{ text-align: center; color: #0F4C81; }}
+        </style></head><body>
+        <h1>BÁO CÁO</h1>
+        <p>Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p><hr>
+        <pre>{noi_dung[:6000]}</pre></body></html>"""
+        with open(duong_dan, "wb") as f:
+            pisa.CreatePDF(html, dest=f)
+        return ten
+    except:
+        return ""
 
 
 # ==================== ROUTE API ====================
@@ -189,15 +269,19 @@ def upload():
     f.save(duong_dan)
     
     noi_dung = ""
-    if ext == "xlsx":
-        wb = load_workbook(duong_dan, data_only=True, read_only=True)
-        ws = wb.active
-        for hang in ws.iter_rows(values_only=True):
-            noi_dung += " | ".join(str(c) if c else "" for c in hang) + "\n"
-        wb.close()
-    elif ext == "txt":
-        with open(duong_dan, "r", encoding="utf-8", errors="ignore") as f:
-            noi_dung = f.read()
+    try:
+        if ext == "xlsx":
+            from openpyxl import load_workbook
+            wb = load_workbook(duong_dan, data_only=True, read_only=True)
+            ws = wb.active
+            for hang in ws.iter_rows(values_only=True):
+                noi_dung += " | ".join(str(c) if c is not None else "" for c in hang) + "\n"
+            wb.close()
+        elif ext == "txt":
+            with open(duong_dan, "r", encoding="utf-8", errors="ignore") as f:
+                noi_dung = f.read()
+    except Exception as e:
+        noi_dung = f"(Không đọc được nội dung: {e})"
     
     return jsonify({"status": "ok", "name": f.filename, "content": noi_dung[:5000]})
 
@@ -211,9 +295,7 @@ def connect_sheet():
     noi_dung, loi = doc_google_sheet(url)
     if loi:
         return jsonify({"error": loi}), 400
-    sheet_id = url.split("/d/")[1].split("/")[0]
-    sheets_state[sheet_id] = noi_dung
-    return jsonify({"status": "ok", "id": sheet_id, "content": noi_dung[:5000]})
+    return jsonify({"status": "ok", "content": noi_dung[:5000]})
 
 
 @app.route("/api/chat-data", methods=["POST"])
@@ -227,14 +309,19 @@ def chat_data():
     if not msg and not full_data:
         return jsonify({"reply": "Vui lòng nhập yêu cầu, tải tệp hoặc dán link Google Sheets!"})
     
-    tra_loi = goi_gemini(msg, full_data, he_thong="""Bạn là chuyên gia phân tích dữ liệu và tạo báo cáo cho nhà máy thủy điện. 
-    Trả lời rõ ràng, có cấu trúc, tóm tắt số liệu quan trọng. Xuất kết quả phù hợp dạng bảng khi có dữ liệu.""")
+    prompt = f"{msg}\n\nDữ liệu phân tích:\n{full_data}" if full_data else msg
+    he_thong = "Bạn là chuyên gia phân tích dữ liệu và tạo báo cáo. Trả lời rõ ràng, tóm tắt số liệu quan trọng, dùng bảng khi phù hợp."
     
-    word = excel = pdf = ""
-    if "❌" not in tra_loi and "⚠️" not in tra_loi:
-        word = tao_word(tra_loi)
-        excel = tao_excel(tra_loi)
-        pdf = tao_pdf(tra_loi)
+    # Chỉ dùng Gemini cho phân tích dữ liệu
+    tra_loi, loi = goi_gemini(prompt, he_thong=he_thong)
+    if not tra_loi:
+        tra_loi, loi = goi_groq(prompt, he_thong=he_thong)
+    if not tra_loi:
+        tra_loi = "⚠️ Tất cả AI phân tích đang bận. Vui lòng thử lại sau."
+    
+    word = tao_word(tra_loi) if "⚠️" not in tra_loi else ""
+    excel = tao_excel(tra_loi) if "⚠️" not in tra_loi else ""
+    pdf = tao_pdf(tra_loi) if "⚠️" not in tra_loi else ""
     
     return jsonify({
         "reply": tra_loi,
@@ -250,10 +337,16 @@ def chat_doc():
     msg = data.get("message", "").strip()
     if not msg:
         return jsonify({"reply": "Vui lòng nhập yêu cầu soạn thảo!"})
-    # Ưu tiên GPT, dự phòng Groq
-    tra_loi = goi_gpt(msg, he_thong="Bạn là chuyên gia soạn thảo văn bản hành chính, hợp đồng, thư từ. Viết chuẩn mực, đầy đủ, đúng văn phong Việt Nam.")
-    if "⚠️" in tra_loi or "❌" in tra_loi:
-        tra_loi = goi_groq(msg, he_thong="Bạn là chuyên gia soạn thảo văn bản hành chính, hợp đồng, thư từ. Viết chuẩn mực, đầy đủ, đúng văn phong Việt Nam.")
+    
+    he_thong = "Bạn là chuyên gia soạn thảo văn bản hành chính, hợp đồng, thư từ. Viết chuẩn mực, đúng thể thức Việt Nam."
+    
+    # GPT → Claude → Groq
+    danh_sach = [
+        ("GPT", lambda p, **kw: goi_gpt(p, **kw)),
+        ("Claude", lambda p, **kw: goi_claude(p, **kw)),
+        ("Llama", lambda p, **kw: goi_groq(p, **kw))
+    ]
+    tra_loi = goi_voi_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
 
@@ -263,10 +356,15 @@ def chat_tender():
     msg = data.get("message", "").strip()
     if not msg:
         return jsonify({"reply": "Vui lòng nhập yêu cầu về quy trình đấu thầu!"})
-    # Ưu tiên Gemini, dự phòng Groq
-    tra_loi = goi_gemini(msg, he_thong="Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, hồ sơ cần chuẩn bị, lưu ý pháp lý.")
-    if "⚠️" in tra_loi or "❌" in tra_loi:
-        tra_loi = goi_groq(msg, he_thong="Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, hồ sơ cần chuẩn bị, lưu ý pháp lý.")
+    
+    he_thong = "Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, hồ sơ, lưu ý pháp lý."
+    
+    # Gemini → Llama
+    danh_sach = [
+        ("Gemini", lambda p, **kw: goi_gemini(p, **kw)),
+        ("Llama", lambda p, **kw: goi_groq(p, **kw))
+    ]
+    tra_loi = goi_voi_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
 
@@ -275,12 +373,20 @@ def chat_equip():
     data = request.get_json(silent=True) or {}
     msg = data.get("message", "").strip()
     file_content = data.get("file_content", "")
+    full_prompt = f"{msg}\n\nDữ liệu thiết bị:\n{file_content[:3000]}" if file_content else msg
+    
     if not msg and not file_content:
         return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải danh sách thiết bị!"})
-    # Ưu tiên Groq/Llama, dự phòng Gemini
-    tra_loi = goi_groq(f"{msg}\nDữ liệu tham khảo:\n{file_content[:3000]}", he_thong="Bạn là chuyên gia quản lý thiết bị nhà máy. Phân loại, theo dõi tình trạng, đề xuất kế hoạch bảo trì, tính tuổi thọ thiết bị.")
-    if "⚠️" in tra_loi or "❌" in tra_loi:
-        tra_loi = goi_gemini(msg, file_content, he_thong="Bạn là chuyên gia quản lý thiết bị nhà máy. Phân loại, theo dõi tình trạng, đề xuất kế hoạch bảo trì, tính tuổi thọ thiết bị.")
+    
+    he_thong = "Bạn là chuyên gia quản lý thiết bị nhà máy. Phân loại, theo dõi tình trạng, đề xuất bảo trì, tính tuổi thọ."
+    
+    # DOLA → Llama → Gemini
+    danh_sach = [
+        ("DOLA", lambda p, **kw: goi_dola(p, **kw)),
+        ("Llama", lambda p, **kw: goi_groq(p, **kw)),
+        ("Gemini", lambda p, **kw: goi_gemini(p, **kw))
+    ]
+    tra_loi = goi_voi_danh_sach(full_prompt, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
 
@@ -339,9 +445,11 @@ body { background: linear-gradient(135deg, #f0f7ff, #faf5ff); min-height: 100vh;
 .card-ai { font-size: 11px; color: #94a3b8; margin-left: auto; }
 .upload-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 14px; text-align: center; cursor: pointer; margin-bottom: 10px; transition: 0.2s; }
 .card-c1 .upload-zone:hover { border-color: var(--c1); background: var(--c1-bg); }
+.card-c4 .upload-zone:hover { border-color: var(--c4); background: var(--c4-bg); }
 .upload-zone p { font-size: 13px; color: #64748b; }
 .file-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
 .card-c1 .file-bar { background: var(--c1-light); }
+.card-c4 .file-bar { background: var(--c4-light); }
 .file-bar button { margin-left: auto; background: none; border: none; font-size: 18px; cursor: pointer; color: #ef4444; }
 .sheet-bar { display: flex; gap: 8px; margin-bottom: 10px; }
 .sheet-bar input { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
@@ -362,6 +470,7 @@ body { background: linear-gradient(135deg, #f0f7ff, #faf5ff); min-height: 100vh;
 .msg.ai .bubble { background: #f8fafc; border: 1px solid var(--border); border-bottom-left-radius: 6px; }
 .bubble.warn { background: #fffbeb; border-left: 3px solid #f59e0b; color: #92400e; }
 .bubble.err { background: #fef2f2; border-left: 3px solid #ef4444; color: #b91c1c; }
+.ai-tag { font-size: 10px; color: #94a3b8; margin-bottom: 4px; }
 .dl-group { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .dl-btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 20px; text-decoration: none; font-size: 12px; font-weight: 600; }
 .dl-word { background: #dbeafe; color: #1d4ed8; }
@@ -390,12 +499,12 @@ textarea:focus { border-color: var(--c1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 </div>
 <div class="grid">
 
-<!-- CỘT 1: XỬ LÝ DỮ LIỆU & TẠO BÁO CÁO → GEMINI + GOOGLE SHEETS -->
+<!-- CỘT 1: XỬ LÝ DỮ LIỆU & TẠO BÁO CÁO → GEMINI + dự phòng LLaMA -->
 <div class="card card-c1">
 <div class="card-head">
 <span class="card-icon">📊</span>
 <h3 class="card-title">Xử lý dữ liệu & Tạo báo cáo</h3>
-<span class="card-ai">Powered by Gemini</span>
+<span class="card-ai">Gemini ↔ Llama</span>
 </div>
 
 <div class="upload-zone" id="uploadZone1" onclick="document.getElementById('fileInput1').click()">
@@ -433,19 +542,19 @@ textarea:focus { border-color: var(--c1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 </div>
 </div>
 
-<!-- CỘT 2: SOẠN THẢO VĂN BẢN → GPT / CLAUDE -->
+<!-- CỘT 2: SOẠN THẢO VĂN BẢN → GPT → CLAUDE → LLAMA -->
 <div class="card card-c2">
 <div class="card-head">
 <span class="card-icon">✍️</span>
 <h3 class="card-title">Soạn thảo văn bản</h3>
-<span class="card-ai">Powered by GPT</span>
+<span class="card-ai">GPT ↔ Claude ↔ Llama</span>
 </div>
 
 <div class="quick-btns">
 <button class="q-btn" onclick="quickDoc('Soạn thảo công văn gửi cấp trên')">📝 Công văn</button>
 <button class="q-btn" onclick="quickDoc('Soạn thảo hợp đồng mua bán thiết bị')">📄 Hợp đồng</button>
 <button class="q-btn" onclick="quickDoc('Viết báo cáo tiến độ thực hiện dự án')">📈 Báo cáo tiến độ</button>
-<button class="q-btn" onclick="quickDoc('Soạn thảo thư mời họp biên bản cuộc họp')">📋 Thư & Biên bản</button>
+<button class="q-btn" onclick="quickDoc('Soạn thảo thư mời họp và biên bản cuộc họp')">📋 Thư & Biên bản</button>
 </div>
 
 <div class="chat-area" id="chat2">
@@ -458,12 +567,12 @@ textarea:focus { border-color: var(--c1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 </div>
 </div>
 
-<!-- CỘT 3: QUY TRÌNH ĐẤU THẦU → GEMINI / LLAMA -->
+<!-- CỘT 3: QUY TRÌNH ĐẤU THẦU → GEMINI → LLAMA -->
 <div class="card card-c3">
 <div class="card-head">
 <span class="card-icon">🏆</span>
 <h3 class="card-title">Quy trình đấu thầu</h3>
-<span class="card-ai">Powered by Gemini + Llama</span>
+<span class="card-ai">Gemini ↔ Llama</span>
 </div>
 
 <div class="quick-btns">
@@ -483,12 +592,12 @@ textarea:focus { border-color: var(--c1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 </div>
 </div>
 
-<!-- CỘT 4: QUẢN LÝ THIẾT BỊ → LLAMA / DOLA -->
+<!-- CỘT 4: QUẢN LÝ THIẾT BỊ → DOLA → LLAMA → GEMINI -->
 <div class="card card-c4">
 <div class="card-head">
 <span class="card-icon">🔧</span>
 <h3 class="card-title">Quản lý thiết bị</h3>
-<span class="card-ai">Powered by Llama</span>
+<span class="card-ai">DOLA ↔ Llama ↔ Gemini</span>
 </div>
 
 <div class="upload-zone" id="uploadZone4" onclick="document.getElementById('fileInput4').click()">
