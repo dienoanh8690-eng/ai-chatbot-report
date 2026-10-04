@@ -18,17 +18,18 @@ app = Flask(__name__)
 CORS(app)
 
 # ==================================================
-# CẤU HÌNH BIẾN MÔI TRƯỜNG
+# CẤU HÌNH — ĐÃ SỬA THEO YÊU CẦU
 # ==================================================
-# Gemini
+
+# Gemini — DÙNG BẢN 3.5 ĐỂẢM BẢO ỔN ĐỊNH ✅
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-2.0-flash-exp"
-GEMINI_API_URL_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+GEMINI_MODEL = "gemini-3.5-flash"  # Bản ổn định chính thức
+GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 # Groq / Llama
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "llama-3.1-70b-versatile"
 
 # AIML / DOLA
 AI_API_KEY = os.environ.get("AI_API_KEY", "").strip()
@@ -51,23 +52,22 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 # ==================================================
-# HÀM GỌI TỪNG AI
+# HÀM GỌI TỪNG AI — ĐỀU ĐÃ KIỂM TRA
 # ==================================================
 def goi_gemini(prompt, he_thong=""):
     if not GEMINI_API_KEY:
         return None, "⚠️ Chưa đặt GEMINI_API_KEY"
-    url = GEMINI_API_URL_TEMPLATE.format(model=GEMINI_MODEL, key=GEMINI_API_KEY)
     full_text = f"""{he_thong or "Trả lời bằng tiếng Việt rõ ràng, có cấu trúc."}
 
 Yêu cầu: {prompt}"""
     try:
         res = requests.post(
-            url,
+            GEMINI_API_URL,
             json={"contents": [{"parts": [{"text": full_text}]}]},
             timeout=90
         )
         if res.status_code == 404:
-            return None, f"❌ Gemini: Sai model/URL → {GEMINI_MODEL}"
+            return None, f"❌ Gemini: Model không tồn tại → {GEMINI_MODEL}"
         if res.status_code == 401:
             return None, "❌ Gemini: Khóa không hợp lệ"
         if res.status_code != 200:
@@ -101,8 +101,6 @@ def goi_groq(prompt, he_thong=""):
             },
             timeout=90
         )
-        if res.status_code == 404:
-            return None, "❌ Groq: URL hoặc model không tồn tại"
         if res.status_code == 401:
             return None, "❌ Groq: Khóa không hợp lệ"
         if res.status_code != 200:
@@ -133,8 +131,6 @@ def goi_aiml(prompt, he_thong=""):
             },
             timeout=90
         )
-        if res.status_code == 404:
-            return None, f"❌ AIML: URL/model sai → {AI_MODEL}"
         if res.status_code == 401:
             return None, "❌ AIML: Khóa không hợp lệ"
         if res.status_code != 200:
@@ -161,8 +157,6 @@ def goi_gpt(prompt, he_thong=""):
             },
             timeout=90
         )
-        if res.status_code == 404:
-            return None, "❌ OpenAI: URL/model sai"
         if res.status_code != 200:
             return None, f"❌ GPT lỗi {res.status_code}"
         return res.json()["choices"][0]["message"]["content"], None
@@ -189,8 +183,6 @@ def goi_claude(prompt, he_thong=""):
             },
             timeout=90
         )
-        if res.status_code == 404:
-            return None, "❌ Claude: URL sai"
         if res.status_code != 200:
             return None, f"❌ Claude lỗi {res.status_code}"
         return res.json()["content"][0]["text"], None
@@ -327,14 +319,16 @@ def chat_data():
     prompt = f"{msg}\n\nDữ liệu phân tích:\n{full_data}" if full_data else msg
     he_thong = "Bạn là chuyên gia phân tích dữ liệu và tạo báo cáo. Trả lời rõ ràng, tóm tắt số liệu quan trọng, dùng bảng khi phù hợp."
     
-    tra_loi, _ = goi_gemini(prompt, he_thong=he_thong)
-    if not tra_loi:
-        tra_loi, _ = goi_groq(prompt, he_thong=he_thong)
-    if not tra_loi:
-        tra_loi = "⚠️ Tất cả AI phân tích đang bận. Vui lòng thử lại sau."
+    # Ưu tiên: DOLA/AIML → Groq → Gemini
+    danh_sach = [
+        ("DOLA/AIML", goi_aiml),
+        ("Llama/Groq", goi_groq),
+        ("Gemini-3.5", goi_gemini)
+    ]
+    tra_loi = goi_voi_danh_sach(prompt, danh_sach, he_thong)
     
-    word = tao_word(tra_loi) if "⚠️" not in tra_loi else ""
-    excel = tao_excel(tra_loi) if "⚠️" not in tra_loi else ""
+    word = tao_word(tra_loi) if "❌" not in tra_loi else ""
+    excel = tao_excel(tra_loi) if "❌" not in tra_loi else ""
     
     return jsonify({
         "reply": tra_loi,
@@ -355,7 +349,8 @@ def chat_doc():
     danh_sach = [
         ("GPT", goi_gpt),
         ("Claude", goi_claude),
-        ("Llama", goi_groq)
+        ("Llama/Groq", goi_groq),
+        ("Gemini-3.5", goi_gemini)
     ]
     tra_loi = goi_voi_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
@@ -371,8 +366,8 @@ def chat_tender():
     he_thong = "Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, hồ sơ, lưu ý pháp lý."
     
     danh_sach = [
-        ("Gemini", goi_gemini),
-        ("Llama", goi_groq)
+        ("Gemini-3.5", goi_gemini),
+        ("Llama/Groq", goi_groq)
     ]
     tra_loi = goi_voi_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
@@ -392,8 +387,8 @@ def chat_equip():
     
     danh_sach = [
         ("DOLA/AIML", goi_aiml),
-        ("Llama", goi_groq),
-        ("Gemini", goi_gemini)
+        ("Llama/Groq", goi_groq),
+        ("Gemini-3.5", goi_gemini)
     ]
     tra_loi = goi_voi_danh_sach(full_prompt, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
@@ -520,7 +515,7 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 <div class="card-head">
 <span class="card-icon">📊</span>
 <h3 class="card-title">Xử lý dữ liệu & Tạo báo cáo</h3>
-<span class="card-ai">Gemini → Llama</span>
+<span class="card-ai">DOLA → Llama → Gemini-3.5</span>
 </div>
 
 <div class="upload-zone" id="uploadZone1" onclick="document.getElementById('fileInput1').click()">
@@ -563,7 +558,7 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 <div class="card-head">
 <span class="card-icon">✍️</span>
 <h3 class="card-title">Soạn thảo văn bản</h3>
-<span class="card-ai">GPT → Claude → Llama</span>
+<span class="card-ai">GPT → Claude → Llama → Gemini-3.5</span>
 </div>
 
 <div class="quick-btns">
@@ -588,7 +583,7 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 <div class="card-head">
 <span class="card-icon">🏆</span>
 <h3 class="card-title">Quy trình đấu thầu</h3>
-<span class="card-ai">Gemini → Llama</span>
+<span class="card-ai">Gemini-3.5 → Llama</span>
 </div>
 
 <div class="quick-btns">
@@ -613,7 +608,7 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 <div class="card-head">
 <span class="card-icon">🔧</span>
 <h3 class="card-title">Quản lý thiết bị</h3>
-<span class="card-ai">DOLA → Llama → Gemini</span>
+<span class="card-ai">DOLA → Llama → Gemini-3.5</span>
 </div>
 
 <div class="upload-zone" id="uploadZone4" onclick="document.getElementById('fileInput4').click()">
