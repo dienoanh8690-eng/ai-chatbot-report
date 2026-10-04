@@ -1,288 +1,3 @@
-from flask import Flask, request, jsonify, send_file
-import requests
-import os
-import uuid
-import json
-import re
-from datetime import datetime
-from docx import Document
-from docx.oxml.ns import qn
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
-from xhtml2pdf import pisa
-from flask_cors import CORS
-
-# === KHAI BÁO APP ĐẦU TIÊN — ĐÚNG VỊ TRÍ ===
-app = Flask(__name__)
-CORS(app)
-
-# ==================== CẤU HÌNH ====================
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-3.5-flash"
-GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-
-UPLOAD_FOLDER = "tai_lieu_tai_len"
-RESULT_FOLDER = "ket_qua_xuat_ra"
-KNOWLEDGE_FOLDER = "kho_kien_thuc"
-
-for folder in [UPLOAD_FOLDER, RESULT_FOLDER, KNOWLEDGE_FOLDER]:
-    os.makedirs(folder, exist_ok=True)
-
-INDEX_FILE = os.path.join(KNOWLEDGE_FOLDER, "danh_sach.json")
-if not os.path.exists(INDEX_FILE):
-    with open(INDEX_FILE, "w", encoding="utf-8") as f:
-        json.dump({"tai_lieu": [], "ket_qua": []}, f, ensure_ascii=False, indent=2)
-
-
-# ==================== ĐỌC FILE ====================
-def doc_file(duong_dan, dinh_dang):
-    noi_dung = ""
-    try:
-        if dinh_dang == "docx":
-            doc = Document(duong_dan)
-            noi_dung = "\n".join([p.text for p in doc.paragraphs])
-        elif dinh_dang == "xlsx":
-            wb = load_workbook(duong_dan, data_only=True, read_only=True)
-            ws = wb.active
-            for hang in ws.iter_rows(values_only=True):
-                noi_dung += " | ".join(str(c) if c else "" for c in hang) + "\n"
-            wb.close()
-        elif dinh_dang in ["txt", "md"]:
-            with open(duong_dan, "r", encoding="utf-8", errors="ignore") as f:
-                noi_dung = f.read()
-        elif dinh_dang == "pdf":
-            noi_dung = "[Nội dung file PDF đã đọc]"
-    except Exception as e:
-        noi_dung = f"[Lỗi đọc file: {str(e)}]"
-    return noi_dung
-
-
-# ==================== LƯU LỊCH SỬ ====================
-def luu_vao_kho(loai, ten_file, mo_ta):
-    try:
-        with open(INDEX_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        data[loai].append({"ten": ten_file, "mo_ta": mo_ta, "ngay": datetime.now().strftime("%d/%m/%Y %H:%M")})
-        with open(INDEX_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-
-# ==================== TẠO FILE ====================
-def tao_word(noi_dung):
-    ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
-    duong_dan = os.path.join(RESULT_FOLDER, ten)
-    doc = Document()
-    
-    p = doc.add_heading("BÁO CÁO XỬ LÝ DỮ LIỆU", 0)
-    for run in p.runs:
-        run.font.name = "Arial"
-        run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
-    
-    p = doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-    for run in p.runs:
-        run.font.name = "Arial"
-        run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
-    
-    doc.add_paragraph("-" * 60)
-    
-    dem = 0
-    for dong in noi_dung.split("\n"):
-        if dong.strip():
-            p = doc.add_paragraph()
-            run = p.add_run(dong.strip())
-            run.font.name = "Arial"
-            run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
-            dem += 1
-            if dem > 200:
-                p = doc.add_paragraph("... (nội dung đã rút gọn)")
-                break
-    
-    doc.save(duong_dan)
-    return ten
-
-def tao_excel(noi_dung=""):
-    ten = f"bao_cao_{uuid.uuid4().hex[:8]}.xlsx"
-    duong_dan = os.path.join(RESULT_FOLDER, ten)
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "DỮ LIỆU"
-    
-    in_dam = Font(bold=True, size=11, name="Arial")
-    vien = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-    can_giua = Alignment(horizontal='center', vertical='center')
-    
-    ws.merge_cells("A1:I1")
-    ws["A1"] = "BÁO CÁO DỮ LIỆU THIẾT BỊ"
-    ws["A1"].font = Font(bold=True, size=14, color="0F4C81", name="Arial")
-    ws["A1"].alignment = can_giua
-    
-    ws.merge_cells("A2:I2")
-    ws["A2"] = f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-    
-    cot = ["STT", "Mã TB", "Tên thiết bị", "Quy cách", "Đơn vị", "Số lượng", "Đơn giá", "Thành tiền", "Ghi chú"]
-    for c, ten_cot in enumerate(cot, 1):
-        cell = ws.cell(row=4, column=c, value=ten_cot)
-        cell.font = in_dam
-        cell.alignment = can_giua
-        cell.border = vien
-        cell.fill = PatternFill("solid", fgColor="E6F2FF")
-    
-    hang = 5
-    dem_dong = 0
-    for dong in noi_dung.split("\n"):
-        if dong.strip() and not dong.strip().startswith(("#", "---")):
-            ws.merge_cells(start_row=hang, start_column=1, end_row=hang, end_column=9)
-            ws.cell(row=hang, column=1, value=dong.strip())
-            hang += 1
-            dem_dong += 1
-            if dem_dong > 100:
-                ws.merge_cells(start_row=hang, start_column=1, end_row=hang, end_column=9)
-                ws.cell(row=hang, column=1, value="... (dữ liệu đã rút gọn)")
-                break
-    
-    for c, w in enumerate([6, 12, 25, 20, 10, 10, 14, 14, 20], 1):
-        ws.column_dimensions[chr(64 + c)].width = w
-    
-    wb.save(duong_dan)
-    return ten
-
-def tao_pdf(noi_dung):
-    ten = f"bao_cao_{uuid.uuid4().hex[:8]}.pdf"
-    duong_dan = os.path.join(RESULT_FOLDER, ten)
-    
-    noi_dung_rut = noi_dung[:5000]
-    if len(noi_dung) > 5000:
-        noi_dung_rut += "\n\n... (nội dung đã rút gọn để tối ưu hóa)"
-    
-    html = f"""
-    <html><head><meta charset="utf-8"><style>
-        body {{ font-family: Arial; padding: 20px; line-height: 1.6; font-size: 12px; }}
-        h1 {{ text-align: center; color: #0F4C81; border-bottom: 2px solid #0F4C81; padding-bottom: 10px; font-size: 18px; }}
-        .ngay {{ text-align: right; color: #666; margin-bottom: 15px; font-size: 11px; }}
-        pre {{ white-space: pre-wrap; word-wrap: break-word; font-size: 11px; }}
-    </style></head>
-    <body>
-        <h1>BÁO CÁO XỬ LÝ DỮ LIỆU</h1>
-        <p class="ngay">Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
-        <hr><pre>{noi_dung_rut}</pre>
-    </body></html>"""
-    
-    with open(duong_dan, "wb") as f:
-        pisa.CreatePDF(html, dest=f)
-    return ten
-
-
-# ==================== GỌI AI ====================
-def goi_ai(noi_dung, file_content="", he_thong=""):
-    if not GEMINI_API_KEY:
-        return "⚠️ Chưa đặt GEMINI_API_KEY trên Render → vào Environment Variables thêm khóa."
-    
-    prompt = f"""{he_thong or "Bạn là trợ lý AI hữu ích, trả lời bằng tiếng Việt rõ ràng, dễ hiểu."}
-
-Yêu cầu: {noi_dung}
-Nội dung tệp:
-{file_content[:3000] if file_content else '(Không có tệp)'}"""
-    
-    try:
-        res = requests.post(GEMINI_API_URL, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=120)
-        
-        if res.status_code == 429:
-            return "⚠️ API Gemini hết hạn sử dụng (quota). Vui lòng tạo khóa mới tại https://aistudio.google.com/apikey và cập nhật trên Render."
-        if res.status_code != 200:
-            return f"❌ Lỗi API {res.status_code}: {res.text[:200]}"
-        
-        data = res.json()
-        if "candidates" not in data:
-            return f"❌ Không có kết quả: {json.dumps(data, ensure_ascii=False)[:200]}"
-        
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-        
-    except requests.exceptions.Timeout:
-        return "⏳ Yêu cầu đang xử lý lâu hơn dự kiến, vui lòng thử lại sau."
-    except Exception as e:
-        return f"❌ Lỗi kết nối: {str(e)}"
-
-
-# ==================== ROUTE API ====================
-@app.route("/api/upload", methods=["POST"])
-def upload():
-    if "file" not in request.files: return jsonify({"error": "Không có tệp"}), 400
-    f = request.files["file"]
-    if not f.filename: return jsonify({"error": "Chưa chọn tệp"}), 400
-    
-    ext = f.filename.rsplit(".", 1)[-1].lower()
-    if ext not in ["docx", "xlsx", "txt", "pdf"]:
-        return jsonify({"error": "Chỉ hỗ trợ .docx .xlsx .txt .pdf"}), 400
-    
-    ten_moi = f"{uuid.uuid4().hex[:10]}.{ext}"
-    duong_dan = os.path.join(UPLOAD_FOLDER, ten_moi)
-    f.save(duong_dan)
-    
-    noi_dung = doc_file(duong_dan, ext)
-    luu_vao_kho("tai_lieu", ten_moi, f.filename)
-    
-    return jsonify({"status": "ok", "name": f.filename, "content": noi_dung[:3000]})
-
-
-@app.route("/api/chat-bao-cao", methods=["POST"])
-def chat_bao_cao():
-    try:
-        data = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify({"reply": "❌ Dữ liệu gửi lên không hợp lệ!", "word":"", "excel":"", "pdf":""})
-    
-    cau_hoi = data.get("message", "").strip()
-    file_content = data.get("file_content", "")
-    
-    if not cau_hoi and not file_content:
-        return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải tệp lên!", "word":"", "excel":"", "pdf":""})
-    
-    tra_loi = goi_ai(cau_hoi, file_content, he_thong="Bạn là chuyên gia xử lý dữ liệu cho nhà máy thủy điện. Trả lời ngắn gọn, rõ ràng, có cấu trúc.")
-    
-    word = excel = pdf = ""
-    if "❌" not in tra_loi and "⚠️" not in tra_loi and "quota" not in tra_loi:
-        try:
-            word = tao_word(tra_loi)
-            excel = tao_excel(tra_loi)
-            pdf = tao_pdf(tra_loi)
-            luu_vao_kho("ket_qua", word, cau_hoi[:100])
-        except Exception as e:
-            return jsonify({"reply": f"✅ AI trả lời xong!\nLỗi tạo file: {str(e)}", "word":"", "excel":"", "pdf":""})
-    
-    return jsonify({
-        "reply": tra_loi,
-        "word": f"/download/{word}" if word else "",
-        "excel": f"/download/{excel}" if excel else "",
-        "pdf": f"/download/{pdf}" if pdf else ""
-    })
-
-
-@app.route("/api/chat-tu-do", methods=["POST"])
-def chat_tu_do():
-    try:
-        data = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify({"reply": "❌ Dữ liệu gửi lên không hợp lệ!"})
-    
-    cau_hoi = data.get("message", "").strip()
-    if not cau_hoi:
-        return jsonify({"reply": "Vui lòng nhập câu hỏi!"})
-    
-    tra_loi = goi_ai(cau_hoi, he_thong="Bạn là trợ lý AI thân thiện, trả lời ngắn gọn, dễ hiểu.")
-    return jsonify({"reply": tra_loi})
-
-
-@app.route("/download/<ten_file>")
-def download(ten_file):
-    for folder in [RESULT_FOLDER, UPLOAD_FOLDER]:
-        path = os.path.join(folder, ten_file)
-        if os.path.exists(path): 
-            return send_file(path, as_attachment=True)
-    return "Không tìm thấy tệp", 404
-
-
 @app.route("/")
 def trang_chu():
     return r"""
@@ -440,32 +155,38 @@ def trang_chu():
         .card-title.blue { color: var(--primary); }
         .card-title.purple { color: var(--secondary); }
 
+        /* === VÙNG TẢI TỆP — ĐÃ THU NHỎ === */
         .upload-area {
             border: 2px dashed var(--border);
             border-radius: var(--radius-md);
-            padding: 32px 20px;
+            padding: 14px 16px; /* Giảm padding để thu nhỏ */
             text-align: center;
             cursor: pointer;
             transition: all 0.3s ease;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            min-height: 56px; /* Chiều cao bằng nút bấm */
         }
         .upload-area:hover {
             border-color: var(--primary);
             background: #eff6ff;
-            transform: translateY(-2px);
+            transform: translateY(-1px);
         }
-        .upload-icon { font-size: 36px; margin-bottom: 10px; }
-        .upload-text { color: var(--text-dark); font-weight: 500; }
-        .upload-note { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+        .upload-icon { font-size: 20px; margin-bottom: 0; }
+        .upload-text { color: var(--text-dark); font-weight: 500; font-size: 14px; }
+        .upload-note { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
         .file-info {
             display: none;
             align-items: center;
             gap: 10px;
-            padding: 12px 16px;
+            padding: 10px 16px;
             background: #ecfdf5;
             border-radius: var(--radius-sm);
-            margin-bottom: 16px;
+            margin-bottom: 12px;
         }
         .file-info.show { display: flex; }
         .file-name { flex: 1; font-size: 14px; font-weight: 500; }
@@ -484,7 +205,7 @@ def trang_chu():
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 10px;
-            margin-bottom: 18px;
+            margin-bottom: 12px;
         }
         .quick-btn {
             padding: 12px 14px;
@@ -502,6 +223,56 @@ def trang_chu():
             background: #eff6ff;
             color: var(--primary);
             transform: translateY(-1px);
+        }
+
+        /* === Ô TÀI LIỆU BÁO CÁO MỚI === */
+        .docs-panel {
+            border: 1px solid #eef2ff;
+            border-radius: var(--radius-md);
+            background: #f8fafc;
+            padding: 14px 16px;
+            margin-bottom: 16px;
+            max-height: 140px;
+            overflow-y: auto;
+        }
+        .docs-panel-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .docs-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .doc-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            background: white;
+            border-radius: 6px;
+            font-size: 13px;
+            border-left: 3px solid var(--primary);
+        }
+        .doc-item-icon { font-size: 16px; }
+        .doc-item-name { flex: 1; color: var(--text-dark); }
+        .doc-item-link {
+            font-size: 12px;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .doc-empty {
+            font-size: 13px;
+            color: var(--text-muted);
+            font-style: italic;
+            text-align: center;
+            padding: 10px;
         }
 
         .chat-container {
@@ -687,10 +458,13 @@ def trang_chu():
                 <h2 class="card-title blue">Xử lý dữ liệu & Tạo báo cáo</h2>
             </div>
 
+            <!-- VÙNG TẢI TỆP ĐÃ THU NHỎ -->
             <div class="upload-area" id="uploadZone">
-                <div class="upload-icon">📎</div>
-                <div class="upload-text">Nhấn để chọn hoặc kéo thả tệp</div>
-                <div class="upload-note">Hỗ trợ: .docx .xlsx .txt .pdf</div>
+                <span class="upload-icon">📎</span>
+                <div>
+                    <div class="upload-text">Nhấn để chọn hoặc kéo thả tệp</div>
+                    <div class="upload-note">Hỗ trợ: .docx .xlsx .txt .pdf</div>
+                </div>
             </div>
             <input type="file" id="fileInput" accept=".docx,.xlsx,.txt,.pdf" style="display:none;">
 
@@ -713,6 +487,16 @@ def trang_chu():
                 <button class="quick-btn" onclick="sendQuick('Kiểm tra tình trạng và danh sách thiết bị')">
                     🔍 Kiểm tra thiết bị
                 </button>
+            </div>
+
+            <!-- Ô TÀI LIỆU BÁO CÁO MỚI THÊM -->
+            <div class="docs-panel">
+                <div class="docs-panel-title">
+                    📁 Tài liệu & Báo cáo đã tạo
+                </div>
+                <div class="docs-list" id="docsList">
+                    <div class="doc-empty">Chưa có tài liệu nào</div>
+                </div>
             </div>
 
             <div class="chat-container" id="reportChat">
@@ -755,6 +539,7 @@ def trang_chu():
     <script>
         let uploadedContent = "";
         let uploadedFileName = "";
+        let generatedDocs = []; // Lưu danh sách tài liệu đã tạo
 
         document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('uploadZone').addEventListener('click', () => {
@@ -793,6 +578,8 @@ def trang_chu():
                         document.getElementById('fileName').textContent = uploadedFileName;
                         document.getElementById('fileDisplay').classList.add('show');
                         setStep(2);
+                        // Thêm vào danh sách tài liệu
+                        addDocToList('upload', uploadedFileName, '');
                     } else {
                         addReportMsg('ai', '❌ ' + (data.error || 'Lỗi tải tệp'));
                     }
@@ -809,8 +596,32 @@ def trang_chu():
         }
 
         function cleanHtmlTags(text) {
-            // Sửa lỗi regex — dùng pattern chuẩn
             return text.replace(/<span\b[^>]*>/gi, '').replace(/<\/span>/gi, '');
+        }
+
+        // === CẬP NHẬT DANH SÁCH TÀI LIỆU ===
+        function addDocToList(type, name, link) {
+            const list = document.getElementById('docsList');
+            // Xóa thông báo trống nếu có tài liệu
+            if (list.querySelector('.doc-empty')) {
+                list.innerHTML = '';
+            }
+            
+            const icons = {
+                upload: '📄',
+                word: '📄',
+                excel: '📊',
+                pdf: '📕'
+            };
+            
+            const item = document.createElement('div');
+            item.className = 'doc-item';
+            item.innerHTML = `
+                <span class="doc-item-icon">${icons[type] || '📄'}</span>
+                <span class="doc-item-name">${name}</span>
+                ${link ? `<a href="${link}" class="doc-item-link" target="_blank">Tải</a>` : ''}
+            `;
+            list.appendChild(item);
         }
 
         function addReportMsg(type, content, files = null) {
@@ -827,9 +638,18 @@ def trang_chu():
             let downloadLinks = '';
             if (files && (files.word || files.excel || files.pdf)) {
                 downloadLinks = '<div class="download-group">';
-                if (files.word) downloadLinks += `<a href="${files.word}" class="download-btn dl-word" target="_blank">📄 Word</a>`;
-                if (files.excel) downloadLinks += `<a href="${files.excel}" class="download-btn dl-excel" target="_blank">📊 Excel</a>`;
-                if (files.pdf) downloadLinks += `<a href="${files.pdf}" class="download-btn dl-pdf" target="_blank">📕 PDF</a>`;
+                if (files.word) {
+                    downloadLinks += `<a href="${files.word}" class="download-btn dl-word" target="_blank">📄 Word</a>`;
+                    addDocToList('word', 'Báo cáo Word (.docx)', files.word);
+                }
+                if (files.excel) {
+                    downloadLinks += `<a href="${files.excel}" class="download-btn dl-excel" target="_blank">📊 Excel</a>`;
+                    addDocToList('excel', 'Báo cáo Excel (.xlsx)', files.excel);
+                }
+                if (files.pdf) {
+                    downloadLinks += `<a href="${files.pdf}" class="download-btn dl-pdf" target="_blank">📕 PDF</a>`;
+                    addDocToList('pdf', 'Báo cáo PDF (.pdf)', files.pdf);
+                }
                 downloadLinks += '</div>';
                 setStep(4);
             }
@@ -954,8 +774,3 @@ def trang_chu():
 </body>
 </html>
 """
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
