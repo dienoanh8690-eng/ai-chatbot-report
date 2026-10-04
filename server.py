@@ -8,21 +8,22 @@ from openpyxl import Workbook
 from xhtml2pdf import pisa
 from flask_cors import CORS
 
-# === KHỞI TẠO APP — ĐÚNG VỊ TRÍ NÀY ===
+# === KHỞI TẠO APP ===
 app = Flask(__name__)
 CORS(app)
 
-# ==================== CẤU HÌNH ====================
+# ==================== CẤU HÌNH — LẤY TỪ BIẾN MÔI TRƯỜNG ====================
 HUGGINGFACE_TOKEN = os.environ.get("HUGGINGFACE_TOKEN", "")
 ZALO_BOT_TOKEN = os.environ.get("ZALO_BOT_TOKEN", "")
 FB_PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN", "")
 FB_VERIFY_TOKEN = os.environ.get("FB_VERIFY_TOKEN", "baocao_ai_2026")
-# ===================================================
+# ============================================================================
 
 THU_MUC_FILES = "generated_files"
 os.makedirs(THU_MUC_FILES, exist_ok=True)
 
-# -------------------- TẠO FILE --------------------
+
+# -------------------- TẠO FILE WORD --------------------
 def tao_word(noi_dung):
     ten_file = f"{THU_MUC_FILES}/bao_cao_{uuid.uuid4().hex[:8]}.docx"
     doc = Document()
@@ -35,109 +36,97 @@ def tao_word(noi_dung):
     doc.save(ten_file)
     return ten_file
 
-def tao_excel(du_lieu=None):
-    ten_file = f"{THU_MUC_FILES}/so_lieu_{uuid.uuid4().hex[:8]}.xlsx"
+
+# -------------------- TẠO FILE EXCEL --------------------
+def tao_excel(noi_dung=""):
+    ten_file = f"{THU_MUC_FILES}/bao_cao_{uuid.uuid4().hex[:8]}.xlsx"
     wb = Workbook()
     ws = wb.active
-    ws.title = "DuLieu"
-    ws.append(["Chỉ tiêu", "Giá trị"])
-    ws.append(["Ngày tạo", datetime.now().strftime("%d/%m/%Y")])
-    if du_lieu:
-        for k, v in du_lieu.items():
-            ws.append([k, v])
+    ws.title = "Báo cáo"
+    ws.append(["Nội dung báo cáo"])
+    ws.append([noi_dung])
+    ws.append(["Ngày tạo", datetime.now().strftime("%d/%m/%Y %H:%M")])
     wb.save(ten_file)
     return ten_file
 
+
+# -------------------- TẠO FILE PDF --------------------
 def tao_pdf(noi_dung):
     ten_file = f"{THU_MUC_FILES}/bao_cao_{uuid.uuid4().hex[:8]}.pdf"
     html = f"""
     <html>
-        <body style="font-family: DejaVu Sans; padding: 20px;">
-            <h1 style="text-align:center; color:#2c3e50;">BÁO CÁO AI TỔNG HỢP</h1>
-            <p style="text-align:right;">Ngày: {datetime.now().strftime('%d/%m/%Y')}</p>
-            <hr>
-            <p>{noi_dung.replace(chr(10), '<br>')}</p>
-        </body>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body {{ font-family: DejaVu Sans; padding: 20px; }}
+            h1 {{ text-align: center; color: #2563eb; }}
+        </style>
+    </head>
+    <body>
+        <h1>BÁO CÁO AI TẠO</h1>
+        <p><strong>Ngày:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+        <hr>
+        <p>{noi_dung.replace(chr(10), '<br>')}</p>
+    </body>
     </html>
     """
     with open(ten_file, "wb") as f:
         pisa.CreatePDF(html, dest=f)
     return ten_file
 
-# -------------------- GỌI AI HUGGING FACE --------------------
+
+# -------------------- GỌI HUGGING FACE AI --------------------
 def goi_ai(noi_dung_nguoi_dung):
-    prompt = f"""Bạn là trợ lý phân tích dữ liệu, tạo báo cáo, soạn văn bản.
-Trả lời bằng tiếng Việt, rõ ràng, có cấu trúc.
-Yêu cầu: {noi_dung_nguoi_dung}"""
+    if not HUGGINGFACE_TOKEN:
+        return "⚠️ Chưa đặt HUGGINGFACE_TOKEN. Vui lòng cấu hình trong Environment trên Render."
+    
+    prompt = f"""Bạn là trợ lý AI thông minh, giúp người dùng tạo báo cáo, tóm tắt thông tin, trả lời câu hỏi.
+Hãy trả lời bằng tiếng Việt rõ ràng, mạch lạc, dễ hiểu.
+
+Câu hỏi / Yêu cầu: {noi_dung_nguoi_dung}
+
+Trả lời:"""
     
     try:
         headers = {
             "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
             "Content-Type": "application/json"
         }
-        data = {
+        
+        payload = {
             "inputs": prompt,
             "parameters": {
-                "max_new_tokens": 1024,
-                "temperature": 0.7
+                "max_new_tokens": 800,
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "return_full_text": False
             }
         }
         
-        api_url = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct"
-        resp = requests.post(api_url, headers=headers, json=data, timeout=120)
-        result = resp.json()
+        url = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct"
         
-        if isinstance(result, list) and len(result) > 0:
-            return result[0].get("generated_text", "Không nhận được phản hồi.")
-        elif isinstance(result, dict):
-            return result.get("generated_text", str(result))
-        return str(result)
+        response = requests.post(url, headers=headers, json=payload, timeout=180)
         
+        if response.status_code == 200:
+            result = response.json()
+            if isinstance(result, list) and len(result) > 0:
+                return result[0].get("generated_text", "Không nhận được phản hồi từ AI")
+            return str(result)
+        elif response.status_code == 503:
+            return "⏳ Mô hình AI đang khởi động, vui lòng gửi lại sau 1–2 phút."
+        else:
+            return f"❌ Lỗi API: Mã {response.status_code} - {response.text[:200]}"
+            
     except Exception as e:
-        return f"Lỗi hệ thống: {str(e)}. Vui lòng thử lại sau ít phút."
+        return f"❌ Lỗi hệ thống: {str(e)}. Vui lòng thử lại sau ít phút."
 
-# -------------------- GỬI TIN NHẮN --------------------
-def gui_zalo(nguoi_dung_id, noi_dung):
-    if not ZALO_BOT_TOKEN: return
-    try:
-        requests.post(
-            "https://openapi.zalo.me/v2.0/message/text",
-            headers={"access_token": ZALO_BOT_TOKEN},
-            json={"user_id": nguoi_dung_id, "text": noi_dung}
-        )
-    except: pass
-
-def gui_fb(tin_nhan_id, noi_dung):
-    if not FB_PAGE_TOKEN: return
-    try:
-        requests.post(
-            f"https://graph.facebook.com/v18.0/me/messages?access_token={FB_PAGE_TOKEN}",
-            json={"recipient": {"id": tin_nhan_id}, "message": {"text": noi_dung}}
-        )
-    except: pass
 
 # -------------------- WEBHOOK ZALO --------------------
 @app.route("/webhooks/zalo", methods=["POST"])
 def zalo_webhook():
     data = request.json
-    if data.get("event_type") == "user_send_text":
-        nd = data["message"]["text"]
-        ai_tra_loi = goi_ai(nd)
-        
-        link_file = ""
-        if any(tu in nd.lower() for tu in ["báo cáo", "tổng hợp", "file", "word", "excel", "pdf"]):
-            fw = tao_word(ai_tra_loi)
-            fe = tao_excel()
-            fp = tao_pdf(ai_tra_loi)
-            link_file = f"""
+    return jsonify({"status": "ok"})
 
-📄 Tải file:
-Word: https://ten-dich-vu.onrender.com/download/{os.path.basename(fw)}
-Excel: https://ten-dich-vu.onrender.com/download/{os.path.basename(fe)}
-PDF: https://ten-dich-vu.onrender.com/download/{os.path.basename(fp)}"""
-        
-        gui_zalo(data["sender_id"], ai_tra_loi + link_file)
-    return "OK"
 
 # -------------------- WEBHOOK FACEBOOK --------------------
 @app.route("/webhooks/messenger", methods=["GET", "POST"])
@@ -147,28 +136,8 @@ def fb_webhook():
         if token_nhan == FB_VERIFY_TOKEN:
             return request.args.get("hub.challenge", "")
         return "Xác minh thất bại", 403
-    
-    data = request.json
-    for entry in data.get("entry", []):
-        for change in entry.get("messaging", []):
-            if "message" in change and not change["message"].get("is_echo"):
-                nd = change["message"]["text"]
-                ai_tra_loi = goi_ai(nd)
-                
-                link_file = ""
-                if any(tu in nd.lower() for tu in ["báo cáo", "tổng hợp", "file", "word", "excel", "pdf"]):
-                    fw = tao_word(ai_tra_loi)
-                    fe = tao_excel()
-                    fp = tao_pdf(ai_tra_loi)
-                    link_file = f"""
+    return jsonify({"status": "ok"})
 
-📄 Tải file:
-Word: https://ten-dich-vu.onrender.com/download/{os.path.basename(fw)}
-Excel: https://ten-dich-vu.onrender.com/download/{os.path.basename(fe)}
-PDF: https://ten-dich-vu.onrender.com/download/{os.path.basename(fp)}"""
-                
-                gui_fb(change["sender"]["id"], ai_tra_loi + link_file)
-    return "OK"
 
 # -------------------- TẢI FILE --------------------
 @app.route("/download/<ten_file>")
@@ -178,58 +147,122 @@ def tai_file(ten_file):
         return send_file(duong_dan, as_attachment=True)
     return "File không tồn tại", 404
 
-# -------------------- WEB CHAT CHO WEBSITE --------------------
+
+# -------------------- CHAT WEB --------------------
 @app.route("/api/chat", methods=["POST"])
 def web_chat():
     data = request.json
-    nd = data.get("message", "")
-    ai_tra_loi = goi_ai(nd)
+    noi_dung = data.get("message", "").strip()
+    if not noi_dung:
+        return jsonify({"reply": "Vui lòng nhập nội dung câu hỏi!"})
     
-    file_links = {}
-    if any(tu in nd.lower() for tu in ["báo cáo", "tổng hợp", "file", "word", "excel", "pdf"]):
-        file_links["word"] = f"/download/{os.path.basename(tao_word(ai_tra_loi))}"
-        file_links["excel"] = f"/download/{os.path.basename(tao_excel())}"
-        file_links["pdf"] = f"/download/{os.path.basename(tao_pdf(ai_tra_loi))}"
+    phan_hoi = goi_ai(noi_dung)
     
-    return jsonify({"reply": ai_tra_loi, "files": file_links})
+    # Tạo file đính kèm
+    word_link = ""
+    excel_link = ""
+    pdf_link = ""
+    
+    if "❌" not in phan_hoi and "⚠️" not in phan_hoi:
+        word_file = tao_word(phan_hoi)
+        excel_file = tao_excel(phan_hoi)
+        pdf_file = tao_pdf(phan_hoi)
+        word_link = f"/download/{os.path.basename(word_file)}"
+        excel_link = f"/download/{os.path.basename(excel_file)}"
+        pdf_link = f"/download/{os.path.basename(pdf_file)}"
+    
+    return jsonify({
+        "reply": phan_hoi,
+        "word": word_link,
+        "excel": excel_link,
+        "pdf": pdf_link
+    })
 
+
+# -------------------- TRANG CHỦ --------------------
 @app.route("/")
 def trang_chu():
     return """
-    <html>
-    <body style="font-family:Arial;max-width:600px;margin:30px auto;padding:0 20px;">
+    <!DOCTYPE html>
+    <html lang="vi">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Trợ lý AI Tạo Báo Cáo</title>
+        <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
+            body { max-width: 700px; margin: 40px auto; padding: 0 20px; background: #f8fafc; }
+            h1 { text-align: center; color: #1e40af; margin-bottom: 10px; }
+            .mota { text-align: center; color: #64748b; margin-bottom: 30px; }
+            .khung { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+            textarea { width: 100%; height: 100px; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 15px; resize: vertical; margin-bottom: 15px; }
+            button { background: #2563eb; color: white; border: none; padding: 12px 30px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+            button:hover { background: #1d4ed8; }
+            button:disabled { background: #94a3b8; cursor: not-allowed; }
+            .ketqua { margin-top: 25px; padding: 15px; background: #f0fdf4; border-radius: 8px; border-left: 4px solid #22c55e; white-space: pre-wrap; }
+            .tai { margin-top: 15px; }
+            .tai a { display: inline-block; margin-right: 15px; color: #2563eb; text-decoration: none; font-weight: bold; }
+            .tai a:hover { text-decoration: underline; }
+            .dangxuat { color: #64748b; margin-top: 10px; font-size: 14px; }
+        </style>
+    </head>
+    <body>
         <h1>🤖 Trợ lý AI Tạo Báo Cáo</h1>
-        <p>Nhập yêu cầu: tổng hợp số liệu, soạn văn bản, tạo báo cáo...</p>
-        <textarea id="input" rows="4" style="width:100%;padding:10px;margin:10px 0;"></textarea>
-        <button onclick="gui()" style="padding:10px 25px;background:#2563eb;color:white;border:none;border-radius:5px;cursor:pointer;">Gửi</button>
-        <div id="ketqua" style="margin-top:20px;white-space:pre-wrap;"></div>
+        <p class="mota">Nhập yêu cầu: tổng hợp số liệu, soạn văn bản, tạo báo cáo...</p>
+        <div class="khung">
+            <textarea id="input" placeholder="Ví dụ: Tạo báo cáo tổng kết tháng 10..."></textarea>
+            <br>
+            <button id="nutgui" onclick="gui()">Gửi</button>
+            <div id="ketqua" class="ketqua" style="display:none;"></div>
+            <div id="tai" class="tai" style="display:none;"></div>
+        </div>
+
         <script>
-        async function gui(){
-            const val = document.getElementById("input").value;
-            document.getElementById("ketqua").innerHTML = "⏳ Đang xử lý...";
+        async function gui() {
+            const input = document.getElementById("input");
+            const nut = document.getElementById("nutgui");
+            const ketqua = document.getElementById("ketqua");
+            const tai = document.getElementById("tai");
+            
+            const noi_dung = input.value.trim();
+            if (!noi_dung) return;
+            
+            nut.disabled = true;
+            nut.innerText = "Đang xử lý...";
+            ketqua.style.display = "block";
+            ketqua.innerText = "⏳ Đang gửi đến AI, vui lòng chờ...";
+            tai.style.display = "none";
+            
             try {
                 const res = await fetch("/api/chat", {
                     method: "POST",
-                    headers: {"Content-Type":"application/json"},
-                    body: JSON.stringify({message: val})
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: noi_dung })
                 });
-                const d = await res.json();
-                let html = d.reply || "Không có phản hồi";
-                if(d.files){
-                    html += "<br><br>📄 Tải file: ";
-                    html += `<a href='${d.files.word}'>Word</a> | `;
-                    html += `<a href='${d.files.excel}'>Excel</a> | `;
-                    html += `<a href='${d.files.pdf}'>PDF</a>`;
+                const data = await res.json();
+                
+                ketqua.innerText = data.reply || "Không có phản hồi";
+                
+                if (data.word || data.excel || data.pdf) {
+                    tai.style.display = "block";
+                    let html = "<strong>Tải file:</strong> ";
+                    if (data.word) html += `<a href="${data.word}" target="_blank">Word</a>`;
+                    if (data.excel) html += `<a href="${data.excel}" target="_blank">Excel</a>`;
+                    if (data.pdf) html += `<a href="${data.pdf}" target="_blank">PDF</a>`;
+                    tai.innerHTML = html;
                 }
-                document.getElementById("ketqua").innerHTML = html;
-            } catch(e) {
-                document.getElementById("ketqua").innerHTML = "❌ Lỗi kết nối: " + e;
+            } catch (e) {
+                ketqua.innerText = "❌ Lỗi kết nối: " + e;
             }
+            
+            nut.disabled = false;
+            nut.innerText = "Gửi";
         }
         </script>
     </body>
     </html>
     """
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
