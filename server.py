@@ -18,25 +18,25 @@ app = Flask(__name__)
 CORS(app)
 
 # ==================================================
-# CẤU HÌNH — ĐÃ SỬA TẤT CẢ LỖI ✅
+# CẤU HÌNH — ĐÚNG TÊN MODEL ✅
 # ==================================================
 
-# Gemini — DÙNG TÊN CHÍNH XÁC TỪ GOOGLE AI STUDIO
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-2.0-flash-exp"  # ✅ Tên chính xác đang hoạt động
-GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-
-# Groq — DÙNG MODEL ĐƯỢC XÁC NHẬN TỒN TẠI
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3-1-8b-instant"  # ✅ Nhỏ hơn, chắc chắn tồn tại & miễn phí
-
-# AIML / DOLA — ƯU TIÊN SỐ 1, ĐÃ CÓ KEY
+# AIML / DOLA — ƯU TIÊN SỐ 1
 AI_API_KEY = os.environ.get("AI_API_KEY", "").strip()
 AI_URL = "https://api.aimlapi.com/v1/chat/completions"
 AI_MODEL = "bytedance/dola-seed-2-0-pro"
 
-# OpenAI
+# Gemini
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = "gemini-2.0-flash-exp"
+GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+
+# Groq / Llama
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = "llama-3-1-8b-instant"
+
+# OpenAI / GPT
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 OPENAI_MODEL = "gpt-3.5-turbo"
@@ -45,30 +45,26 @@ OPENAI_MODEL = "gpt-3.5-turbo"
 CLAUDE_API_KEY = os.environ.get("CLAUDE", "").strip()
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
-# Thư mục tệp
+# Thư mục
 UPLOAD_FOLDER = "tai_lieu_tai_len"
 RESULT_FOLDER = "ket_qua_xuat_ra"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 # ==================================================
-# HÀM GỌI AI — ĐƠN GIẢN, CHẮC CHẮN
+# HÀM GỌI TỪNG AI — TRẢ VỀ (tên, kết quả, lỗi)
 # ==================================================
 def goi_aiml(prompt, he_thong=""):
-    """Đã có key → chạy đầu tiên, ưu tiên nhất"""
     if not AI_API_KEY:
-        return None, "⚠️ Chưa đặt AI_API_KEY"
+        return "DOLA/AIML", None, "⚠️ Chưa đặt AI_API_KEY"
     try:
         res = requests.post(
             AI_URL,
-            headers={
-                "Authorization": f"Bearer {AI_API_KEY}",
-                "Content-Type": "application/json"
-            },
+            headers={"Authorization": f"Bearer {AI_API_KEY}", "Content-Type": "application/json"},
             json={
                 "model": AI_MODEL,
                 "messages": [
-                    {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt rõ ràng, dễ hiểu."},
+                    {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt rõ ràng, tự nhiên."},
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": 0.7,
@@ -77,43 +73,36 @@ def goi_aiml(prompt, he_thong=""):
             timeout=90
         )
         if res.status_code == 200:
-            return res.json()["choices"][0]["message"]["content"], None
-        return None, f"AIML lỗi {res.status_code}: {res.text[:100]}"
+            return "DOLA/AIML", res.json()["choices"][0]["message"]["content"], None
+        return "DOLA/AIML", None, f"Lỗi {res.status_code}"
     except Exception as e:
-        return None, f"Lỗi kết nối AIML: {str(e)}"
+        return "DOLA/AIML", None, f"Lỗi kết nối: {str(e)}"
 
 
 def goi_gemini(prompt, he_thong=""):
     if not GEMINI_API_KEY:
-        return None, "⚠️ Chưa đặt GEMINI_API_KEY"
+        return "Gemini", None, "⚠️ Chưa đặt GEMINI_API_KEY"
     full_text = f"""{he_thong or "Trả lời bằng tiếng Việt."}
 
 Yêu cầu: {prompt}"""
     try:
-        res = requests.post(
-            GEMINI_API_URL,
-            json={"contents": [{"parts": [{"text": full_text}]}]},
-            timeout=90
-        )
+        res = requests.post(GEMINI_API_URL, json={"contents": [{"parts": [{"text": full_text}]}]}, timeout=90)
         if res.status_code == 200:
             data = res.json()
             if "candidates" in data:
-                return data["candidates"][0]["content"]["parts"][0]["text"], None
-        return None, f"Gemini lỗi {res.status_code}"
+                return "Gemini", data["candidates"][0]["content"]["parts"][0]["text"], None
+        return "Gemini", None, f"Lỗi {res.status_code}"
     except Exception as e:
-        return None, f"Lỗi kết nối Gemini: {str(e)}"
+        return "Gemini", None, f"Lỗi kết nối: {str(e)}"
 
 
 def goi_groq(prompt, he_thong=""):
     if not GROQ_API_KEY:
-        return None, "⚠️ Chưa đặt GROQ_API_KEY"
+        return "Llama/Groq", None, "⚠️ Chưa đặt GROQ_API_KEY"
     try:
         res = requests.post(
             GROQ_API_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
             json={
                 "model": GROQ_MODEL,
                 "messages": [
@@ -126,15 +115,15 @@ def goi_groq(prompt, he_thong=""):
             timeout=90
         )
         if res.status_code == 200:
-            return res.json()["choices"][0]["message"]["content"], None
-        return None, f"Groq lỗi {res.status_code}"
+            return "Llama/Groq", res.json()["choices"][0]["message"]["content"], None
+        return "Llama/Groq", None, f"Lỗi {res.status_code}"
     except Exception as e:
-        return None, f"Lỗi kết nối Groq: {str(e)}"
+        return "Llama/Groq", None, f"Lỗi kết nối: {str(e)}"
 
 
 def goi_gpt(prompt, he_thong=""):
     if not OPENAI_API_KEY:
-        return None, "⚠️ Chưa đặt OPENAI_API_KEY"
+        return "GPT", None, "⚠️ Chưa đặt OPENAI_API_KEY"
     try:
         res = requests.post(
             OPENAI_API_URL,
@@ -150,15 +139,15 @@ def goi_gpt(prompt, he_thong=""):
             timeout=90
         )
         if res.status_code == 200:
-            return res.json()["choices"][0]["message"]["content"], None
-        return None, f"GPT lỗi {res.status_code}"
+            return "GPT", res.json()["choices"][0]["message"]["content"], None
+        return "GPT", None, f"Lỗi {res.status_code}"
     except Exception as e:
-        return None, f"Lỗi kết nối GPT: {str(e)}"
+        return "GPT", None, f"Lỗi kết nối: {str(e)}"
 
 
 def goi_claude(prompt, he_thong=""):
     if not CLAUDE_API_KEY:
-        return None, "⚠️ Chưa đặt CLAUDE"
+        return "Claude", None, "⚠️ Chưa đặt CLAUDE"
     try:
         res = requests.post(
             CLAUDE_API_URL,
@@ -176,25 +165,28 @@ def goi_claude(prompt, he_thong=""):
             timeout=90
         )
         if res.status_code == 200:
-            return res.json()["content"][0]["text"], None
-        return None, f"Claude lỗi {res.status_code}"
+            return "Claude", res.json()["content"][0]["text"], None
+        return "Claude", None, f"Lỗi {res.status_code}"
     except Exception as e:
-        return None, f"Lỗi kết nối Claude: {str(e)}"
+        return "Claude", None, f"Lỗi kết nối: {str(e)}"
 
 
 # ==================================================
-# CHUYỂN ĐỔI — DOLA/AIML LUÔN ĐƯỢC GỌI ĐẦU TIÊN
+# LUỒNG GỌI — ĐÚNG THỨ TỰ TỪNG MỤC ✅
 # ==================================================
-def goi_voi_danh_sach(prompt, danh_sach_ai, he_thong=""):
-    for ten, ham in danh_sach_ai:
-        ket_qua, loi = ham(prompt, he_thong=he_thong)
-        if ket_qua:
-            return f"✅ [{ten}]\n{ket_qua}"
-    return f"❌ Tất cả AI đều không trả lời:\n{loi}"
+def goi_theo_danh_sach(prompt, danh_sach_ham, he_thong=""):
+    """Chạy tuần tự, trả về AI đầu tiên thành công"""
+    loi_tong = []
+    for ham in danh_sach_ham:
+        ten, kq, loi = ham(prompt, he_thong=he_thong)
+        if kq:
+            return f"✅ [{ten}]\n{kq}"
+        loi_tong.append(f"{ten}: {loi}")
+    return "❌ Tất cả AI đều không trả lời:\n" + "\n".join(f"× {x}" for x in loi_tong)
 
 
 # ==================================================
-# ĐỌC GOOGLE SHEETS
+# ĐỌC GOOGLE SHEETS & TẠO TỆP
 # ==================================================
 def doc_google_sheet(sheet_url):
     try:
@@ -205,14 +197,11 @@ def doc_google_sheet(sheet_url):
         res = requests.get(csv_url, timeout=30)
         if res.status_code == 200:
             return res.text, None
-        return None, "❌ Không đọc được Sheet → Kiểm tra chia sẻ: Bất kỳ ai có link"
+        return None, "❌ Không đọc được Sheet → Kiểm tra quyền chia sẻ: Bất kỳ ai có link"
     except Exception as e:
         return None, f"❌ Lỗi đọc Sheet: {str(e)}"
 
 
-# ==================================================
-# TẠO TỆP WORD / EXCEL
-# ==================================================
 def tao_word(noi_dung):
     try:
         ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
@@ -256,8 +245,9 @@ def tao_excel(noi_dung=""):
 
 
 # ==================================================
-# ROUTE API
+# ROUTE API — ĐÚNG AI CHO TỪNG MỤC ✅
 # ==================================================
+
 @app.route("/api/upload", methods=["POST"])
 def upload():
     if "file" not in request.files:
@@ -267,7 +257,6 @@ def upload():
     ten_moi = f"{uuid.uuid4().hex[:10]}.{ext}"
     duong_dan = os.path.join(UPLOAD_FOLDER, ten_moi)
     f.save(duong_dan)
-    
     noi_dung = ""
     try:
         if ext == "xlsx":
@@ -281,7 +270,6 @@ def upload():
                 noi_dung = f.read()
     except Exception as e:
         noi_dung = f"(Không đọc được nội dung: {e})"
-    
     return jsonify({"status": "ok", "name": f.filename, "content": noi_dung[:5000]})
 
 
@@ -299,31 +287,22 @@ def connect_sheet():
 
 @app.route("/api/chat-data", methods=["POST"])
 def chat_data():
+    """📊 Xử lý dữ liệu — DOLA/AIML → Gemini → Llama/Groq"""
     data = request.get_json(silent=True) or {}
     msg = data.get("message", "").strip()
     file_content = data.get("file_content", "")
     sheet_content = data.get("sheet_content", "")
     full_data = f"{file_content}\n---\n{sheet_content}".strip()
-    
     if not msg and not full_data:
         return jsonify({"reply": "Vui lòng nhập yêu cầu, tải tệp hoặc dán link Google Sheets!"})
-    
     prompt = f"{msg}\n\nDữ liệu phân tích:\n{full_data}" if full_data else msg
     he_thong = "Bạn là chuyên gia phân tích dữ liệu và tạo báo cáo. Trả lời rõ ràng, tóm tắt số liệu quan trọng, dùng bảng khi phù hợp."
     
-    # ✅ DOLA/AIML LUÔN ĐẦU TIÊN — ĐÃ CÓ KEY → CHẮC CHẮN CHẠY
-    danh_sach = [
-        ("DOLA/AIML", goi_aiml),
-        ("Gemini", goi_gemini),
-        ("Llama/Groq", goi_groq),
-        ("GPT", goi_gpt),
-        ("Claude", goi_claude)
-    ]
-    tra_loi = goi_voi_danh_sach(prompt, danh_sach, he_thong)
+    danh_sach = [goi_aiml, goi_gemini, goi_groq]  # ✅ KHÔNG CÓ CLAUDE
+    tra_loi = goi_theo_danh_sach(prompt, danh_sach, he_thong)
     
     word = tao_word(tra_loi) if "✅" in tra_loi else ""
     excel = tao_excel(tra_loi) if "✅" in tra_loi else ""
-    
     return jsonify({
         "reply": tra_loi,
         "word": f"/download/{word}" if word else "",
@@ -333,64 +312,45 @@ def chat_data():
 
 @app.route("/api/chat-doc", methods=["POST"])
 def chat_doc():
+    """✍️ Soạn thảo — DOLA/AIML → GPT → Claude"""
     data = request.get_json(silent=True) or {}
     msg = data.get("message", "").strip()
     if not msg:
         return jsonify({"reply": "Vui lòng nhập yêu cầu soạn thảo!"})
-    
     he_thong = "Bạn là chuyên gia soạn thảo văn bản hành chính, hợp đồng, thư từ. Viết chuẩn mực, đúng thể thức Việt Nam."
     
-    danh_sach = [
-        ("DOLA/AIML", goi_aiml),
-        ("GPT", goi_gpt),
-        ("Claude", goi_claude),
-        ("Gemini", goi_gemini),
-        ("Llama/Groq", goi_groq)
-    ]
-    tra_loi = goi_voi_danh_sach(msg, danh_sach, he_thong)
+    danh_sach = [goi_aiml, goi_gpt, goi_claude]  # ✅ ĐÚNG: có Claude ở cuối
+    tra_loi = goi_theo_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
 
 @app.route("/api/chat-tender", methods=["POST"])
 def chat_tender():
+    """🏆 Đấu thầu — DOLA/AIML → Gemini → Llama/Groq"""
     data = request.get_json(silent=True) or {}
     msg = data.get("message", "").strip()
     if not msg:
         return jsonify({"reply": "Vui lòng nhập yêu cầu về quy trình đấu thầu!"})
-    
     he_thong = "Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, hồ sơ, lưu ý pháp lý."
     
-    danh_sach = [
-        ("DOLA/AIML", goi_aiml),
-        ("Gemini", goi_gemini),
-        ("Llama/Groq", goi_groq),
-        ("GPT", goi_gpt),
-        ("Claude", goi_claude)
-    ]
-    tra_loi = goi_voi_danh_sach(msg, danh_sach, he_thong)
+    danh_sach = [goi_aiml, goi_gemini, goi_groq]  # ✅ KHÔNG CÓ CLAUDE
+    tra_loi = goi_theo_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
 
 @app.route("/api/chat-equip", methods=["POST"])
 def chat_equip():
+    """🔧 Thiết bị — DOLA/AIML → Gemini → Llama/Groq"""
     data = request.get_json(silent=True) or {}
     msg = data.get("message", "").strip()
     file_content = data.get("file_content", "")
     full_prompt = f"{msg}\n\nDữ liệu thiết bị:\n{file_content[:3000]}" if file_content else msg
-    
     if not msg and not file_content:
         return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải danh sách thiết bị!"})
-    
     he_thong = "Bạn là chuyên gia quản lý thiết bị nhà máy. Phân loại, theo dõi tình trạng, đề xuất bảo trì, tính tuổi thọ."
     
-    danh_sach = [
-        ("DOLA/AIML", goi_aiml),
-        ("Gemini", goi_gemini),
-        ("Llama/Groq", goi_groq),
-        ("GPT", goi_gpt),
-        ("Claude", goi_claude)
-    ]
-    tra_loi = goi_voi_danh_sach(full_prompt, danh_sach, he_thong)
+    danh_sach = [goi_aiml, goi_gemini, goi_groq]  # ✅ KHÔNG CÓ CLAUDE
+    tra_loi = goi_theo_danh_sach(full_prompt, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
 
