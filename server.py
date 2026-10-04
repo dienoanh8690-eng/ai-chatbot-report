@@ -8,12 +8,11 @@ from openpyxl import Workbook
 from xhtml2pdf import pisa
 from flask_cors import CORS
 
-# === KHỞI TẠO APP ===
 app = Flask(__name__)
 CORS(app)
 
 # ==================== CẤU HÌNH BIẾN MÔI TRƯỜNG ====================
-HUGGINGFACE_TOKEN = os.environ.get("HUGGINGFACE_TOKEN", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 ZALO_BOT_TOKEN = os.environ.get("ZALO_BOT_TOKEN", "")
 FB_PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN", "")
 FB_VERIFY_TOKEN = os.environ.get("FB_VERIFY_TOKEN", "baocao_ai_2026")
@@ -75,50 +74,42 @@ def tao_pdf(noi_dung):
     return ten_file
 
 
-# -------------------- GỌI HUGGING FACE AI --------------------
+# -------------------- GỌI GOOGLE GEMINI AI --------------------
 def goi_ai(noi_dung_nguoi_dung):
-    if not HUGGINGFACE_TOKEN:
-        return "⚠️ Chưa đặt HUGGINGFACE_TOKEN. Vui lòng cấu hình trong Environment trên Render."
+    if not GEMINI_API_KEY:
+        return "⚠️ Chưa đặt GEMINI_API_KEY. Lấy miễn phí tại: aistudio.google.com/apikey"
     
-    prompt = f"""Bạn là trợ lý AI thông minh, giúp người dùng tạo báo cáo, tóm tắt thông tin, trả lời câu hỏi.
-Hãy trả lời bằng tiếng Việt rõ ràng, mạch lạc, dễ hiểu.
+    prompt = f"""Bạn là trợ lý AI thông minh, giúp người dùng tạo báo cáo, tóm tắt thông tin, soạn văn bản, trả lời câu hỏi.
+Hãy trả lời bằng tiếng Việt rõ ràng, mạch lạc, dễ hiểu, có cấu trúc phù hợp.
 
-Câu hỏi / Yêu cầu: {noi_dung_nguoi_dung}
-
-Trả lời:"""
+Câu hỏi / Yêu cầu: {noi_dung_nguoi_dung}"""
     
     try:
-        headers = {
-            "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
-            "Content-Type": "application/json"
-        }
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
         
         payload = {
-            "inputs": prompt,
-            "parameters": {
-                "max_new_tokens": 800,
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "return_full_text": False
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }],
+            "generationConfig": {
+                "maxOutputTokens": 1024,
+                "temperature": 0.7
             }
         }
         
-        url = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct"
-        
-        response = requests.post(url, headers=headers, json=payload, timeout=180)
+        response = requests.post(url, json=payload, timeout=60)
         
         if response.status_code == 200:
             result = response.json()
-            if isinstance(result, list) and len(result) > 0:
-                return result[0].get("generated_text", "Không nhận được phản hồi từ AI")
-            return str(result)
-        elif response.status_code == 503:
-            return "⏳ Mô hình AI đang khởi động, vui lòng gửi lại sau 1–2 phút."
+            try:
+                return result["candidates"][0]["content"]["parts"][0]["text"]
+            except (KeyError, IndexError):
+                return "Không nhận được nội dung phản hồi từ AI"
         else:
             return f"❌ Lỗi API: Mã {response.status_code} - {response.text[:200]}"
             
     except Exception as e:
-        return f"❌ Lỗi kết nối AI: {str(e)}\n\n💡 Nếu lỗi vẫn xảy ra, ta có thể chuyển sang dùng Google Gemini miễn phí."
+        return f"❌ Lỗi kết nối: {str(e)}"
 
 
 # -------------------- WEBHOOK ZALO --------------------
