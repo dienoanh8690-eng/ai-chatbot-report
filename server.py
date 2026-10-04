@@ -14,9 +14,9 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# ==================== CẤU HÌNH ====================
+# ==================== CẤU HÌNH ĐÃ SỬA LỖI 404 ====================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-pro"
+GEMINI_MODEL = "gemini-2.0-flash"  # ← ĐÃ ĐỔI TÊN MÔ HÌNH MỚI
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 # === THƯ MỤC ===
@@ -147,7 +147,7 @@ Nội dung tệp:
     try:
         res = requests.post(GEMINI_API_URL, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=60)
         if res.status_code != 200:
-            return f"❌ Lỗi API {res.status_code}: {res.text[:200]}"
+            return f"❌ Lỗi API {res.status_code}: {res.text[:300]}"
         data = res.json()
         if "candidates" not in data:
             return f"❌ Không có kết quả: {json.dumps(data, ensure_ascii=False)}"
