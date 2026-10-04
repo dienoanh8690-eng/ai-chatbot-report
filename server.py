@@ -7,7 +7,7 @@ from datetime import datetime
 from docx import Document
 from docx.oxml.ns import qn
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, Alignment, Border, Side
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from xhtml2pdf import pisa
 from flask_cors import CORS
 
@@ -16,10 +16,10 @@ CORS(app)
 
 # ==================== CẤU HÌNH ====================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-2.0-flash"  # Hoặc gemini-1.5-flash
+GEMINI_MODEL = "gemini-1.5-flash"  # Hoặc gemini-3.5-flash
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
-# === THƯ MỤC LƯU ===
+# === THƯ MỤC ===
 UPLOAD_FOLDER = "tai_lieu_tai_len"
 RESULT_FOLDER = "ket_qua_xuat_ra"
 KNOWLEDGE_FOLDER = "kho_kien_thuc"
@@ -125,6 +125,7 @@ def tao_excel(noi_dung=""):
         cell.font = in_dam
         cell.alignment = can_giua
         cell.border = vien
+        cell.fill = PatternFill("solid", fgColor="E6F2FF")
 
     hang = 5
     for dong in noi_dung.split("\n"):
@@ -172,7 +173,7 @@ def tao_pdf(noi_dung):
     return ten
 
 
-# -------------------- GỌI AI + KIỂM TRA LỖI --------------------
+# -------------------- GỌI AI --------------------
 def goi_ai(noi_dung, file_content=""):
     if not GEMINI_API_KEY:
         return "⚠️ Chưa đặt GEMINI_API_KEY trên Render. Vào Environment Variables thêm khóa API."
@@ -187,31 +188,24 @@ Nội dung file:
 Trả lời bằng tiếng Việt, rõ ràng, có cấu trúc."""
 
     try:
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }]
-        }
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
         res = requests.post(GEMINI_API_URL, json=payload, timeout=60)
 
-        # Kiểm tra mã trạng thái
         if res.status_code != 200:
-            return f"❌ API trả mã lỗi {res.status_code}: {res.text[:200]}"
+            return f"❌ API trả mã lỗi {res.status_code}: {res.text[:250]}"
 
-        # Thử phân tích JSON
         try:
             data = res.json()
         except Exception as e:
-            return f"❌ API không trả JSON. Nội dung: {res.text[:300]}"
+            return f"❌ API không trả JSON: {res.text[:250]}"
 
-        # Kiểm tra cấu trúc phản hồi
         if "candidates" not in data or not data["candidates"]:
             return f"❌ Không có kết quả từ AI: {json.dumps(data, ensure_ascii=False)}"
 
         return data["candidates"][0]["content"]["parts"][0]["text"]
 
     except requests.exceptions.Timeout:
-        return "⏳ Hết thời gian chờ API. Thử lại sau."
+        return "⏳ Hết thời gian chờ. Thử lại sau."
     except Exception as e:
         return f"❌ Lỗi kết nối: {str(e)}"
 
@@ -282,59 +276,198 @@ def trang_chu():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>All thủy điện</title>
+    <title>All Thủy Điện — Xử Lý Dữ Liệu Thông Minh</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: Arial, sans-serif; }
-        body { max-width: 850px; margin: 30px auto; padding: 0 20px; background: #f0f7ff; }
-        h1 { text-align: center; color: #0f4c81; margin-bottom: 30px; }
-        .box { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .upload-area { border: 2px dashed #94b8d9; padding: 25px; text-align: center; border-radius: 10px; cursor: pointer; margin-bottom: 15px; }
-        .upload-area:hover { border-color: #0f4c81; background: #e6f2ff; }
-        .upload-area.active { border-color: #22c55e; background: #f0fdf4; }
-        .file-info { margin: 10px 0 20px; padding: 10px 15px; background: #e6ffed; border-radius: 6px; display: none; color: #166534; font-weight: bold; }
-        textarea { width: 100%; height: 110px; padding: 14px; border: 1px solid #b3d1e8; border-radius: 8px; font-size: 15px; margin-bottom: 15px; resize: vertical; }
-        button { background: #0f4c81; color: white; border: none; padding: 13px 30px; border-radius: 8px; font-size: 16px; cursor: pointer; width: 100%; font-weight: bold; }
-        button:hover { background: #0d3c68; }
-        button:disabled { background: #94b8d9; cursor: not-allowed; }
-        .result-section { margin-top: 25px; display: none; }
-        .result-label { font-weight: bold; color: #0f4c81; margin-bottom: 10px; font-size: 16px; }
-        .result-box { padding: 20px; background: #f8fbff; border-radius: 8px; border-left: 4px solid #0f4c81; white-space: pre-wrap; line-height: 1.7; max-height: 500px; overflow-y: auto; margin-bottom: 20px; }
-        .download-box { padding: 15px 20px; background: #f0f9ff; border-radius: 8px; border: 1px solid #cce0f0; display: none; }
-        .download-label { font-weight: bold; color: #0f4c81; margin-bottom: 12px; }
-        .download-buttons { display: flex; gap: 12px; flex-wrap: wrap; }
-        .download-btn { padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-flex; align-items: center; gap: 8px; }
-        .word { background: #e6f2ff; color: #0f4c81; }
-        .excel { background: #e6ffed; color: #166534; }
-        .pdf { background: #ffe6e6; color: #991b1b; }
-        .download-btn:hover { transform: translateY(-2px); box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .error { color: #dc2626; background: #fef2f2; padding: 12px; border-radius: 6px; border-left: 4px solid #ef4444; }
+        :root {
+            --primary: #165DFF;
+            --primary-dark: #0E42D2;
+            --success: #00B42A;
+            --warning: #FF7D00;
+            --danger: #F53F3F;
+            --bg: #F2F3F5;
+            --card: #FFFFFF;
+            --text-1: #1D2129;
+            --text-2: #4E5969;
+            --text-3: #86909C;
+            --border: #E5E6EB;
+            --shadow: 0 4px 24px rgba(0,0,0,0.08);
+            --shadow-sm: 0 2px 8px rgba(0,0,0,0.05);
+            --radius: 12px;
+            --radius-lg: 16px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #E8F3FF 0%, #F2F3F5 100%);
+            color: var(--text-1);
+            line-height: 1.6;
+            padding: 0;
+            min-height: 100vh;
+        }
+        .page-wrapper {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 32px 20px 48px;
+        }
+        .header { text-align: center; margin-bottom: 36px; }
+        .logo-wrap {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 56px; height: 56px; border-radius: 16px;
+            background: linear-gradient(135deg, #165DFF 0%, #4080FF 100%);
+            color: white; font-size: 28px; font-weight: 700; margin-bottom: 12px;
+            box-shadow: 0 8px 20px rgba(22, 93, 255, 0.25);
+        }
+        .header h1 {
+            font-size: 26px; font-weight: 700; color: var(--text-1); margin-bottom: 4px;
+        }
+        .header p { font-size: 15px; color: var(--text-2); }
+        .card {
+            background: var(--card); border-radius: var(--radius-lg);
+            box-shadow: var(--shadow); padding: 28px; margin-bottom: 20px;
+            animation: cardIn .4s ease-out;
+        }
+        @keyframes cardIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .upload-zone {
+            border: 2px dashed #C9CDD4; border-radius: var(--radius); padding: 36px 20px;
+            text-align: center; cursor: pointer; transition: all 0.3s ease;
+            background: #FAFAFA; margin-bottom: 16px;
+        }
+        .upload-zone:hover {
+            border-color: var(--primary); background: #F0F5FF; transform: scale(1.01);
+        }
+        .upload-zone.active {
+            border-color: var(--success); background: #E8FFEA; border-style: solid;
+        }
+        .upload-zone .icon { font-size: 32px; margin-bottom: 8px; }
+        .upload-zone .title { font-weight: 600; color: var(--text-1); margin-bottom: 4px; }
+        .upload-zone .sub { font-size: 13px; color: var(--text-3); }
+        .file-info {
+            display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+            background: #E8FFEA; border-radius: 8px; margin-bottom: 20px;
+            display: none; border-left: 3px solid var(--success);
+        }
+        .file-info.show { display: flex; }
+        .file-info .name { font-weight: 500; color: var(--success); }
+        textarea {
+            width: 100%; min-height: 110px; padding: 16px; border: 1px solid var(--border);
+            border-radius: var(--radius); font-size: 15px; font-family: inherit;
+            resize: vertical; margin-bottom: 16px; transition: border 0.2s, box-shadow 0.2s;
+        }
+        textarea:focus {
+            outline: none; border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(22, 93, 255, 0.1);
+        }
+        .btn {
+            width: 100%; padding: 14px 24px; border: none; border-radius: var(--radius);
+            font-size: 16px; font-weight: 600; cursor: pointer; font-family: inherit;
+            transition: all 0.2s ease;
+        }
+        .btn-primary {
+            background: linear-gradient(90deg, var(--primary) 0%, #4080FF 100%);
+            color: white; box-shadow: 0 4px 12px rgba(22, 93, 255, 0.25);
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(22, 93, 255, 0.35); }
+        .btn-primary:disabled {
+            background: #C9CDD4; cursor: not-allowed; transform: none; box-shadow: none;
+        }
+        .result-section { margin-top: 24px; display: none; }
+        .result-section.show { display: block; animation: fadeIn 0.4s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .section-title {
+            font-weight: 600; font-size: 15px; color: var(--text-1); margin-bottom: 12px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .result-box {
+            background: #F7F8FA; border-radius: var(--radius); padding: 20px;
+            border-left: 4px solid var(--primary); white-space: pre-wrap;
+            line-height: 1.8; font-size: 14px; max-height: 480px; overflow-y: auto;
+            margin-bottom: 20px;
+        }
+        .result-box.error { border-left-color: var(--danger); background: #FFECEC; }
+        .download-wrap {
+            background: #F0F5FF; border-radius: var(--radius); padding: 20px;
+            border: 1px solid #D6E4FF; display: none;
+        }
+        .download-wrap.show { display: block; animation: fadeIn 0.4s ease; }
+        .download-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px;
+        }
+        @media (max-width: 520px) {
+            .download-grid { grid-template-columns: 1fr; }
+        }
+        .download-btn {
+            display: flex; flex-direction: column; align-items: center; gap: 6px;
+            padding: 14px 10px; border-radius: 10px; text-decoration: none; font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .download-btn:hover { transform: translateY(-2px); }
+        .dw-word { background: #E8F3FF; color: var(--primary); }
+        .dw-word:hover { background: #D6E8FF; }
+        .dw-excel { background: #E8FFEA; color: var(--success); }
+        .dw-excel:hover { background: #D6FFDB; }
+        .dw-pdf { background: #FFECEC; color: var(--danger); }
+        .dw-pdf:hover { background: #FFDBDB; }
+        .dw-icon { font-size: 20px; }
+        .dw-label { font-size: 13px; }
+        .hint { font-size: 12px; color: var(--text-3); margin-top: -10px; margin-bottom: 14px; }
     </style>
 </head>
 <body>
-    <h1>⚡ All thủy điện</h1>
-    <div class="box">
-        <div class="upload-area" id="khuTai" onclick="document.getElementById('chonFile').click()">
-            <strong>📎 Tải file tài liệu lên</strong><br>
-            <span style="color:#666; font-size:13px;">.docx .xlsx .txt .pdf</span>
-            <input type="file" id="chonFile" accept=".docx,.xlsx,.txt,.pdf" style="display:none;" onchange="xuLyFile(this)">
-        </div>
-        <div class="file-info" id="thongTinFile">✅ Đã chọn: <span id="tenFile"></span></div>
-
-        <textarea id="cauhoi" placeholder="Nhập yêu cầu..."></textarea>
-
-        <button id="nutGui" onclick="gui()">Gửi & Phân tích</button>
-
-        <div class="result-section" id="phanKetQua">
-            <div class="result-label">📋 Kết quả xử lý:</div>
-            <div class="result-box" id="ketQua"></div>
+    <div class="page-wrapper">
+        <div class="header">
+            <div class="logo-wrap">⚡</div>
+            <h1>All Thủy Điện</h1>
+            <p>Xử lý dữ liệu & lập báo cáo thông minh</p>
         </div>
 
-        <div class="download-box" id="khuTaiVe">
-            <div class="download-label">💾 Tải kết quả về máy:</div>
-            <div class="download-buttons">
-                <a id="btnWord" href="#" class="download-btn word" target="_blank">📄 Tải Word</a>
-                <a id="btnExcel" href="#" class="download-btn excel" target="_blank">📊 Tải Excel</a>
-                <a id="btnPdf" href="#" class="download-btn pdf" target="_blank">📕 Tải PDF</a>
+        <div class="card">
+            <div class="upload-zone" id="khuTai" onclick="document.getElementById('chonFile').click()">
+                <div class="icon">📎</div>
+                <div class="title">Tải tệp tài liệu lên</div>
+                <div class="sub">Hỗ trợ: .docx .xlsx .txt .pdf</div>
+                <input type="file" id="chonFile" accept=".docx,.xlsx,.txt,.pdf" style="display:none;" onchange="xuLyFile(this)">
+            </div>
+
+            <div class="file-info" id="thongTinFile">
+                <span>✅</span>
+                <span class="name" id="tenFile"></span>
+            </div>
+
+            <textarea id="cauhoi" placeholder="Nhập yêu cầu: kiểm tra, sắp xếp A-Z, tính thành tiền, tổng cộng..."></textarea>
+            <p class="hint">Để trống chỉ tải file → hệ thống tự chuẩn hóa & tóm tắt</p>
+
+            <button class="btn btn-primary" id="nutGui" onclick="gui()">
+                <span id="nutText">🚀 Bắt đầu xử lý</span>
+            </button>
+
+            <div class="result-section" id="phanKetQua">
+                <div class="section-title">📋 Kết quả xử lý</div>
+                <div class="result-box" id="ketQua"></div>
+            </div>
+
+            <div class="download-wrap" id="khuTaiVe">
+                <div class="section-title">💾 Tải kết quả về máy</div>
+                <div class="download-grid">
+                    <a id="btnWord" href="#" class="download-btn dw-word" target="_blank">
+                        <span class="dw-icon">📄</span>
+                        <span class="dw-label">Tải Word</span>
+                    </a>
+                    <a id="btnExcel" href="#" class="download-btn dw-excel" target="_blank">
+                        <span class="dw-icon">📊</span>
+                        <span class="dw-label">Tải Excel</span>
+                    </a>
+                    <a id="btnPdf" href="#" class="download-btn dw-pdf" target="_blank">
+                        <span class="dw-icon">📕</span>
+                        <span class="dw-label">Tải PDF</span>
+                    </a>
+                </div>
             </div>
         </div>
     </div>
@@ -347,42 +480,48 @@ def trang_chu():
             if (!file) return;
             const khu = document.getElementById("khuTai");
             const thongTin = document.getElementById("thongTinFile");
-            khu.classList.add("active");
-            khu.innerHTML = "⏳ Đang đọc file...";
+            
+            khu.classList.remove("active");
+            khu.innerHTML = `<div class="icon">⏳</div><div class="title">Đang đọc tệp...</div>`;
+            
             const formData = new FormData();
             formData.append("file", file);
+            
             try {
                 const res = await fetch("/api/upload", { method: "POST", body: formData });
                 const data = await res.json();
+                
                 if (data.status === "ok") {
                     fileContent = data.content;
-                    khu.innerHTML = "✅ Sẵn sàng nhận file";
-                    thongTin.style.display = "block";
+                    khu.classList.add("active");
+                    khu.innerHTML = `<div class="icon">✅</div><div class="title">Sẵn sàng nhận dữ liệu</div>`;
+                    thongTin.classList.add("show");
                     document.getElementById("tenFile").textContent = data.name;
                 } else {
-                    khu.innerHTML = "❌ " + (data.error || "Lỗi tải");
+                    khu.innerHTML = `<div class="icon">❌</div><div class="title">${data.error || 'Lỗi tải tệp'}</div>`;
                 }
             } catch (e) {
-                khu.innerHTML = "❌ Lỗi: " + e.message;
+                khu.innerHTML = `<div class="icon">❌</div><div class="title">Lỗi kết nối</div>`;
             }
         }
 
         async function gui() {
             const cauhoi = document.getElementById("cauhoi").value.trim();
             const nut = document.getElementById("nutGui");
+            const nutText = document.getElementById("nutText");
             const phanKetQua = document.getElementById("phanKetQua");
             const ketQua = document.getElementById("ketQua");
             const khuTaiVe = document.getElementById("khuTaiVe");
 
             if (!cauhoi && !fileContent) {
-                alert("Vui lòng nhập yêu cầu hoặc tải file lên!");
+                alert("Vui lòng nhập yêu cầu hoặc tải tệp lên!");
                 return;
             }
 
             nut.disabled = true;
-            nut.textContent = "⏳ Đang xử lý...";
-            phanKetQua.style.display = "none";
-            khuTaiVe.style.display = "none";
+            nutText.textContent = "⏳ Đang xử lý...";
+            phanKetQua.classList.remove("show");
+            khuTaiVe.classList.remove("show");
 
             try {
                 const res = await fetch("/api/chat", {
@@ -391,32 +530,34 @@ def trang_chu():
                     body: JSON.stringify({ message: cauhoi, file_content: fileContent })
                 });
 
-                // Kiểm tra trước khi parse JSON
                 const text = await res.text();
                 let data;
                 try {
                     data = JSON.parse(text);
                 } catch (e) {
-                    phanKetQua.style.display = "block";
-                    ketQua.innerHTML = `<div class="error">❌ Phản hồi không phải JSON:<br>${text.substring(0, 300)}</div>`;
+                    phanKetQua.classList.add("show");
+                    ketQua.classList.add("error");
+                    ketQua.textContent = `❌ Phản hồi không hợp lệ:\\n${text.substring(0, 300)}`;
                     return;
                 }
 
+                ketQua.classList.remove("error");
                 ketQua.textContent = data.reply || "Không có phản hồi";
-                phanKetQua.style.display = "block";
+                phanKetQua.classList.add("show");
 
                 if (data.word || data.excel || data.pdf) {
-                    khuTaiVe.style.display = "block";
+                    khuTaiVe.classList.add("show");
                     if (data.word) document.getElementById("btnWord").href = data.word;
                     if (data.excel) document.getElementById("btnExcel").href = data.excel;
                     if (data.pdf) document.getElementById("btnPdf").href = data.pdf;
                 }
             } catch (e) {
-                phanKetQua.style.display = "block";
-                ketQua.innerHTML = `<div class="error">❌ Lỗi: ${e.message}</div>`;
+                phanKetQua.classList.add("show");
+                ketQua.classList.add("error");
+                ketQua.textContent = `❌ Lỗi: ${e.message}`;
             } finally {
                 nut.disabled = false;
-                nut.textContent = "Gửi & Phân tích";
+                nutText.textContent = "🚀 Bắt đầu xử lý";
             }
         }
     </script>
