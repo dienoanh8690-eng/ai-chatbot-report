@@ -135,17 +135,15 @@ def tao_pdf(noi_dung):
     return ten
 
 
-# -------------------- GỌI AI --------------------
-def goi_ai(noi_dung, file_content=""):
+# -------------------- GỌI AI CHUNG --------------------
+def goi_ai(noi_dung, file_content="", he_thong=""):
     if not GEMINI_API_KEY:
         return "⚠️ Chưa đặt GEMINI_API_KEY trên Render → vào Environment Variables thêm khóa."
-    prompt = f"""Bạn là chuyên gia xử lý dữ liệu cho nhà máy thủy điện.
+    prompt = f"""{he_thong or "Bạn là trợ lý AI hữu ích, trả lời bằng tiếng Việt rõ ràng, dễ hiểu."}
 
 Yêu cầu: {noi_dung}
 Nội dung tệp:
-{file_content if file_content else '(Không có tệp)'}
-
-Trả lời bằng tiếng Việt, rõ ràng, có cấu trúc."""
+{file_content if file_content else '(Không có tệp)'}"""
     try:
         res = requests.post(GEMINI_API_URL, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=60)
         if res.status_code != 200:
@@ -175,14 +173,14 @@ def upload():
     return jsonify({"status": "ok", "name": f.filename, "content": noi_dung[:3000]})
 
 
-@app.route("/api/chat", methods=["POST"])
-def chat():
+@app.route("/api/chat-bao-cao", methods=["POST"])
+def chat_bao_cao():
     data = request.json or {}
     cau_hoi = data.get("message", "").strip()
     file_content = data.get("file_content", "")
     if not cau_hoi and not file_content:
         return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải tệp lên!"})
-    tra_loi = goi_ai(cau_hoi, file_content)
+    tra_loi = goi_ai(cau_hoi, file_content, he_thong="Bạn là chuyên gia xử lý dữ liệu cho nhà máy thủy điện. Trả lời rõ ràng, có cấu trúc.")
     word = excel = pdf = ""
     if "❌" not in tra_loi and "⚠️" not in tra_loi:
         word = tao_word(tra_loi)
@@ -195,6 +193,16 @@ def chat():
         "excel": f"/download/{excel}" if excel else "",
         "pdf": f"/download/{pdf}" if pdf else ""
     })
+
+
+@app.route("/api/chat-tu-do", methods=["POST"])
+def chat_tu_do():
+    data = request.json or {}
+    cau_hoi = data.get("message", "").strip()
+    if not cau_hoi:
+        return jsonify({"reply": "Vui lòng nhập câu hỏi!"})
+    tra_loi = goi_ai(cau_hoi, he_thong="Bạn là trợ lý AI thân thiện, trả lời bằng tiếng Việt tự nhiên, dễ hiểu.")
+    return jsonify({"reply": tra_loi})
 
 
 @app.route("/download/<ten_file>")
@@ -220,16 +228,17 @@ def trang_chu():
             --primary: #165DFF; --success: #00B42A; --danger: #F53F3F;
             --bg: #F7F8FA; --card: #FFFFFF;
             --bubble-user: #E8F3FF; --bubble-ai: #F2F3F5;
+            --bubble-chat-user: #EDE7F6; --bubble-chat-ai: #F3E5F5;
             --text-1: #1D2129; --text-2: #4E5969; --border: #E5E6EB;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif; background: var(--bg);
-            height: 100vh; display: flex; flex-direction: column;
+            min-height: 100vh; display: flex; flex-direction: column;
         }
         .header {
             padding: 16px 24px; background: white; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-            display: flex; align-items: center; gap: 12px;
+            display: flex; align-items: center; gap: 12px; z-index: 10;
         }
         .logo {
             width: 40px; height: 40px; border-radius: 10px; background: linear-gradient(135deg, #165DFF, #4080FF);
@@ -238,64 +247,122 @@ def trang_chu():
         .header h1 { font-size: 18px; font-weight: 600; }
         .header p { font-size: 13px; color: var(--text-2); }
 
-        .chat-container { flex: 1; overflow-y: auto; padding: 20px; max-width: 800px; margin: 0 auto; width: 100%; }
-        .message { margin-bottom: 24px; display: flex; max-width: 95%; animation: bubbleIn 0.3s ease; }
-        @keyframes bubbleIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        /* Thanh quy trình */
+        .process-bar {
+            background: white; padding: 12px 24px; border-bottom: 1px solid var(--border);
+            display: flex; justify-content: space-between; align-items: center;
+            max-width: 1200px; margin: 0 auto; width: 100%; flex-wrap: wrap; gap: 8px;
+        }
+        .process-step { display: flex; align-items: center; gap: 8px; }
+        .step-number {
+            width: 24px; height: 24px; border-radius: 50%; background: var(--bg);
+            color: var(--text-2); display: flex; align-items: center; justify-content: center;
+            font-weight: 600; font-size: 12px;
+        }
+        .step-number.active { background: var(--primary); color: white; }
+        .step-text { font-size: 13px; color: var(--text-2); }
+        .step-text.active { color: var(--primary); font-weight: 500; }
+
+        /* Bố cục chính */
+        .main-container {
+            flex: 1; max-width: 1200px; margin: 0 auto; width: 100%; padding: 20px;
+            display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+        }
+
+        /* Card chung */
+        .card {
+            background: white; border-radius: 16px; padding: 20px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08); display: flex; flex-direction: column;
+        }
+        .card-title {
+            font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--text-1);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .card-title.bc { border-bottom: 2px solid var(--primary); padding-bottom: 8px; }
+        .card-title.ai { border-bottom: 2px solid #9C27B0; padding-bottom: 8px; }
+
+        /* Khu vực báo cáo */
+        .upload-area {
+            border: 2px dashed var(--border); border-radius: 12px; padding: 24px;
+            text-align: center; cursor: pointer; transition: all 0.2s; margin-bottom: 16px;
+        }
+        .upload-area:hover { border-color: var(--primary); background: #F0F7FF; }
+        .upload-icon { font-size: 36px; margin-bottom: 8px; }
+        .file-selected {
+            padding: 10px 14px; background: #E8FFEA; border-radius: 8px; display: none;
+            align-items: center; gap: 10px; margin-bottom: 16px;
+        }
+        .file-selected.show { display: flex; }
+        .clear-file {
+            margin-left: auto; cursor: pointer; color: var(--danger); font-weight: bold;
+            border: none; background: none; font-size: 18px;
+        }
+        .quick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+        .quick-btn {
+            padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+            background: white; cursor: pointer; font-size: 13px; transition: all 0.2s; text-align: left;
+        }
+        .quick-btn:hover { border-color: var(--primary); background: #F0F7FF; color: var(--primary); }
+
+        /* Khu vực hội thoại */
+        .chat-box { flex: 1; overflow-y: auto; padding: 4px; min-height: 350px; }
+        .message {
+            margin-bottom: 16px; display: flex; max-width: 95%;
+            animation: bubbleIn 0.3s ease;
+        }
+        @keyframes bubbleIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
         .message.user { justify-content: flex-end; margin-left: auto; }
         .message.ai { justify-content: flex-start; margin-right: auto; }
         .bubble {
-            padding: 16px 20px; border-radius: 16px; line-height: 1.6; white-space: pre-wrap;
+            padding: 12px 16px; border-radius: 16px; line-height: 1.6; white-space: pre-wrap;
+            font-size: 14px;
         }
-        .user .bubble { background: var(--bubble-user); border-bottom-right-radius: 4px; }
-        .ai .bubble { background: var(--bubble-ai); border-bottom-left-radius: 4px; }
+        .bao-cao .user .bubble { background: var(--bubble-user); border-bottom-right-radius: 4px; }
+        .bao-cao .ai .bubble { background: var(--bubble-ai); border-bottom-left-radius: 4px; }
+        .chat-tu-do .user .bubble { background: var(--bubble-chat-user); border-bottom-right-radius: 4px; }
+        .chat-tu-do .ai .bubble { background: var(--bubble-chat-ai); border-bottom-left-radius: 4px; }
+
         .file-tag {
-            display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
-            background: #E8FFEA; border-radius: 20px; font-size: 13px; margin-bottom: 10px;
+            display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+            background: #E8FFEA; border-radius: 16px; font-size: 12px; margin-bottom: 8px;
         }
-        .download-row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+        .download-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
         .dl-btn {
-            padding: 8px 16px; border-radius: 20px; text-decoration: none; font-size: 13px; font-weight: 600;
-            display: inline-flex; align-items: center; gap: 6px; transition: transform 0.2s;
+            padding: 6px 14px; border-radius: 18px; text-decoration: none; font-size: 12px; font-weight: 600;
+            display: inline-flex; align-items: center; gap: 4px; transition: transform 0.2s;
         }
         .dl-btn:hover { transform: translateY(-2px); }
         .dl-word { background: #E8F3FF; color: var(--primary); }
         .dl-excel { background: #E8FFEA; color: var(--success); }
         .dl-pdf { background: #FFECEC; color: var(--danger); }
 
-        .file-selected {
-            max-width: 800px; margin: 8px auto 0; display: flex; align-items: center;
-            gap: 10px; padding: 8px 16px; background: #E8FFEA; border-radius: 8px; font-size: 14px;
-            display: none;
-        }
-        .file-selected.show { display: flex; }
-        .clear-file { margin-left: auto; cursor: pointer; color: var(--danger); font-weight: bold; border: none; background: none; font-size: 18px; }
-
-        .input-bar {
-            background: white; padding: 16px 20px; box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
-            border-top: 1px solid var(--border);
-        }
-        .input-inner {
-            max-width: 800px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;
-        }
-        .attach-btn {
-            width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--bg);
-            cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center;
-            transition: background 0.2s; flex-shrink: 0;
-        }
-        .attach-btn:hover { background: #E8F3FF; }
-        .input-wrapper { flex: 1; position: relative; min-width: 200px; }
+        /* Ô nhập liệu */
+        .input-row { display: flex; gap: 8px; align-items: flex-end; margin-top: 12px; }
         textarea {
-            width: 100%; min-height: 44px; max-height: 120px; padding: 12px 16px; border: 1px solid var(--border);
-            border-radius: 24px; font-size: 15px; font-family: inherit; resize: none; outline: none;
+            flex: 1; min-height: 44px; max-height: 100px; padding: 10px 14px;
+            border: 1px solid var(--border); border-radius: 20px;
+            font-size: 14px; font-family: inherit; resize: none; outline: none;
             transition: border 0.2s;
         }
         textarea:focus { border-color: var(--primary); }
         .send-btn {
-            width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--primary);
-            color: white; cursor: pointer; font-size: 18px; transition: all 0.2s; flex-shrink: 0;
+            width: 40px; height: 40px; border-radius: 50%; border: none;
+            background: var(--primary); color: white; cursor: pointer; font-size: 16px;
+            transition: all 0.2s; flex-shrink: 0;
         }
         .send-btn:hover { background: #0E42D2; transform: scale(1.05); }
         .send-btn:disabled { background: #C9CDD4; cursor: not-allowed; transform: none; }
+        .chat-tu-do .send-btn { background: #9C27B0; }
+        .chat-tu-do .send-btn:hover { background: #7B1FA2; }
+        .chat-tu-do textarea:focus { border-color: #9C27B0; }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .main-container { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -303,37 +370,84 @@ def trang_chu():
         <div class="logo">⚡</div>
         <div>
             <h1>All Thủy Điện</h1>
-            <p>Trợ lý xử lý dữ liệu & lập báo cáo</p>
+            <p>Xử lý dữ liệu & Trò chuyện với AI</p>
         </div>
     </div>
 
-    <div class="chat-container" id="khuTroChuyen">
-        <div class="message ai">
-            <div class="bubble">
-                👋 Xin chào! Tôi có thể giúp bạn:
-                <br>• Tải tệp lên để đọc & phân tích
-                <br>• Nhập yêu cầu: sắp xếp, tính toán, lập báo cáo...
-                <br>• Nhận kết quả & tải Word/Excel/PDF ngay trong đây
+    <div class="process-bar">
+        <div class="process-step">
+            <div class="step-number active" id="buoc1">1</div>
+            <div class="step-text active" id="t1">Tải tệp</div>
+        </div>
+        <div class="process-step">
+            <div class="step-number" id="buoc2">2</div>
+            <div class="step-text" id="t2">Phân tích</div>
+        </div>
+        <div class="process-step">
+            <div class="step-number" id="buoc3">3</div>
+            <div class="step-text" id="t3">Kết quả</div>
+        </div>
+        <div class="process-step">
+            <div class="step-number" id="buoc4">4</div>
+            <div class="step-text" id="t4">Tải báo cáo</div>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <!-- BÊN TRÁI: XỬ LÝ DỮ LIỆU & BÁO CÁO -->
+        <div class="card bao-cao">
+            <div class="card-title bc">📊 Xử lý dữ liệu & Báo cáo</div>
+
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📎</div>
+                <div>Nhấn để chọn hoặc kéo thả tệp</div>
+                <div style="font-size: 12px; color: var(--text-2); margin-top: 4px;">.docx .xlsx .txt .pdf</div>
             </div>
-        </div>
-    </div>
-
-    <div class="file-selected" id="thongTinTep">
-        <span>📎</span>
-        <span id="tenTep"></span>
-        <button class="clear-file" onclick="xoaTep()">✕</button>
-    </div>
-
-    <div class="input-bar">
-        <div class="input-inner">
-            <button class="attach-btn" id="nutDinhKem" title="Tải tệp">📎</button>
             <input type="file" id="chonTep" accept=".docx,.xlsx,.txt,.pdf" style="display:none;">
             
-            <div class="input-wrapper">
-                <textarea id="noiDungNhap" placeholder="Nhập yêu cầu... (Enter gửi, Shift+Enter xuống dòng)"></textarea>
+            <div class="file-selected" id="thongTinTep">
+                <span>📎</span>
+                <span id="tenTep"></span>
+                <button class="clear-file" onclick="xoaTep()">✕</button>
             </div>
-            
-            <button class="send-btn" id="nutGui" title="Gửi">➤</button>
+
+            <div class="quick-actions">
+                <button class="quick-btn" onclick="nhapYeuCauVaGui('Sắp xếp dữ liệu theo tên thiết bị')">Sắp xếp dữ liệu</button>
+                <button class="quick-btn" onclick="nhapYeuCauVaGui('Tính thành tiền = số lượng × đơn giá')">Tính thành tiền</button>
+                <button class="quick-btn" onclick="nhapYeuCauVaGui('Lập báo cáo tổng hợp')">Lập báo cáo</button>
+                <button class="quick-btn" onclick="nhapYeuCauVaGui('Kiểm tra tình trạng thiết bị')">Kiểm tra thiết bị</button>
+            </div>
+
+            <div class="chat-box" id="khuBaoCao">
+                <div class="message ai">
+                    <div class="bubble">
+                        👋 Tải tệp lên hoặc chọn yêu cầu nhanh để bắt đầu xử lý dữ liệu và lập báo cáo.
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-row">
+                <textarea id="inputBaoCao" placeholder="Nhập yêu cầu... (Enter gửi, Shift+Enter xuống dòng)" onkeydown="xuLyPhimBaoCao(event)"></textarea>
+                <button class="send-btn" id="nutGuiBaoCao" onclick="guiBaoCao()">➤</button>
+            </div>
+        </div>
+
+        <!-- BÊN PHẢI: TRÒ CHUYỆN VỚI AI -->
+        <div class="card chat-tu-do">
+            <div class="card-title ai">💬 Trò chuyện với AI</div>
+
+            <div class="chat-box" id="khuChatTuDo">
+                <div class="message ai">
+                    <div class="bubble">
+                        👋 Tôi là AI trợ lý. Bạn có thể hỏi tôi bất cứ điều gì nhé!
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-row">
+                <textarea id="inputChatTuDo" placeholder="Hỏi AI bất kỳ điều gì..." onkeydown="xuLyPhimChat(event)"></textarea>
+                <button class="send-btn" id="nutGuiChat" onclick="guiChatTuDo()">➤</button>
+            </div>
         </div>
     </div>
 
@@ -341,135 +455,143 @@ def trang_chu():
         let fileContent = "";
         let tenTepDaChon = "";
 
-        // Gắn sự kiện sau khi trang tải xong
         document.addEventListener('DOMContentLoaded', function() {
-            // Nút đính kèm
-            document.getElementById('nutDinhKem').addEventListener('click', function() {
-                document.getElementById('chonTep').click();
-            });
-            
-            // Chọn file
+            document.getElementById('uploadArea').addEventListener('click', () => document.getElementById('chonTep').click());
             document.getElementById('chonTep').addEventListener('change', chonTep);
-            
-            // Nút gửi
-            document.getElementById('nutGui').addEventListener('click', guiYeuCau);
-            
-            // Enter gửi
-            document.getElementById('noiDungNhap').addEventListener('keydown', xuLyPhim);
         });
 
+        // === QUY TRÌNH BÁO CÁO ===
+        function capNhatBuoc(n) {
+            for (let i = 1; i <= 4; i++) {
+                const b = document.getElementById('buoc'+i);
+                const t = document.getElementById('t'+i);
+                if (i <= n) {
+                    b.classList.add('active'); t.classList.add('active');
+                } else {
+                    b.classList.remove('active'); t.classList.remove('active');
+                }
+            }
+        }
+
         function chonTep(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            tenTepDaChon = file.name;
-            const formData = new FormData();
-            formData.append("file", file);
-            
-            fetch("/api/upload", { method: "POST", body: formData })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.status === "ok") {
-                        fileContent = data.content;
-                        document.getElementById("tenTep").textContent = tenTepDaChon;
-                        document.getElementById("thongTinTep").classList.add("show");
+            const f = e.target.files[0];
+            if (!f) return;
+            tenTepDaChon = f.name;
+            const fd = new FormData(); fd.append('file', f);
+            fetch('/api/upload', { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(d => {
+                    if (d.status === 'ok') {
+                        fileContent = d.content;
+                        document.getElementById('tenTep').textContent = tenTepDaChon;
+                        document.getElementById('thongTinTep').classList.add('show');
+                        capNhatBuoc(2);
                     } else {
-                        themTinNhan("ai", "❌ " + (data.error || "Lỗi tải tệp"));
+                        themTinBaoCao('ai', '❌ ' + (d.error || 'Lỗi tải tệp'));
                     }
                 })
-                .catch(err => themTinNhan("ai", "❌ Lỗi kết nối khi tải tệp: " + err.message));
+                .catch(err => themTinBaoCao('ai', '❌ Lỗi: ' + err.message));
         }
 
         function xoaTep() {
-            fileContent = "";
-            tenTepDaChon = "";
-            document.getElementById("thongTinTep").classList.remove("show");
-            document.getElementById("chonTep").value = "";
+            fileContent = ''; tenTepDaChon = '';
+            document.getElementById('thongTinTep').classList.remove('show');
+            document.getElementById('chonTep').value = '';
+            capNhatBuoc(1);
         }
 
-        function xuLyPhim(e) {
-            if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                guiYeuCau();
+        function nhapYeuCauVaGui(text) {
+            document.getElementById('inputBaoCao').value = text;
+            guiBaoCao();
+        }
+
+        function xuLyPhimBaoCao(e) {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); guiBaoCao(); }
+        }
+
+        function themTinBaoCao(loai, nd, links=null) {
+            const kh = document.getElementById('khuBaoCao');
+            const div = document.createElement('div');
+            div.className = 'message ' + loai;
+            let html = nd.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            let linkHtml = '';
+            if (links && (links.word||links.excel||links.pdf)) {
+                linkHtml = '<div class="download-row">';
+                if (links.word) linkHtml += `<a href="${links.word}" class="dl-btn dl-word" target="_blank">📄 Word</a>`;
+                if (links.excel) linkHtml += `<a href="${links.excel}" class="dl-btn dl-excel" target="_blank">📊 Excel</a>`;
+                if (links.pdf) linkHtml += `<a href="${links.pdf}" class="dl-btn dl-pdf" target="_blank">📕 PDF</a>`;
+                linkHtml += '</div>';
+            }
+            div.innerHTML = `<div class="bubble">${html}${linkHtml}</div>`;
+            kh.appendChild(div); kh.scrollTop = kh.scrollHeight;
+            if (loai === 'ai') {
+                capNhatBuoc(3);
+                if (links && (links.word||links.excel||links.pdf)) capNhatBuoc(4);
             }
         }
 
-        function themTinNhan(loai, noiDung, fileLinks) {
-            const khu = document.getElementById("khuTroChuyen");
-            const div = document.createElement("div");
-            div.className = `message ${loai}`;
-            
-            let noiDungHtml = noiDung
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;");
-            
-            let linksHtml = "";
-            if (fileLinks) {
-                if (fileLinks.word || fileLinks.excel || fileLinks.pdf) {
-                    linksHtml = `<div class="download-row">`;
-                    if (fileLinks.word) linksHtml += `<a href="${fileLinks.word}" class="dl-btn dl-word" target="_blank">📄 Word</a>`;
-                    if (fileLinks.excel) linksHtml += `<a href="${fileLinks.excel}" class="dl-btn dl-excel" target="_blank">📊 Excel</a>`;
-                    if (fileLinks.pdf) linksHtml += `<a href="${fileLinks.pdf}" class="dl-btn dl-pdf" target="_blank">📕 PDF</a>`;
-                    linksHtml += `</div>`;
-                }
-            }
-            
-            div.innerHTML = `<div class="bubble">${noiDungHtml}${linksHtml}</div>`;
-            khu.appendChild(div);
-            khu.scrollTop = khu.scrollHeight;
-        }
+        async function guiBaoCao() {
+            const inp = document.getElementById('inputBaoCao');
+            const btn = document.getElementById('nutGuiBaoCao');
+            const msg = inp.value.trim();
+            if (!msg && !fileContent) return;
 
-        async function guiYeuCau() {
-            const input = document.getElementById("noiDungNhap");
-            const nut = document.getElementById("nutGui");
-            const cauHoi = input.value.trim();
-            
-            if (!cauHoi && !fileContent) {
-                return;
-            }
-            
-            // Hiển thị câu hỏi người dùng
-            let hienThiCauHoi = cauHoi;
+            let hien = msg;
             if (tenTepDaChon) {
-                hienThiCauHoi = `<span class="file-tag">📎 ${tenTepDaChon}</span>\n${cauHoi || "Phân tích nội dung tệp"}`;
+                hien = `<span class="file-tag">📎 ${tenTepDaChon}</span>\n${msg || 'Phân tích nội dung tệp'}`;
             }
-            themTinNhan("user", hienThiCauHoi);
-            
-            // Reset
-            input.value = "";
-            nut.disabled = true;
-            nut.textContent = "⏳";
-            
+            themTinBaoCao('user', hien);
+            inp.value = ''; btn.disabled = true; btn.textContent = '⏳';
+
             try {
-                const res = await fetch("/api/chat", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ message: cauHoi, file_content: fileContent })
+                const res = await fetch('/api/chat-bao-cao', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ message: msg, file_content: fileContent })
                 });
-                
-                const text = await res.text();
-                let data;
-                try {
-                    data = JSON.parse(text);
-                } catch (e) {
-                    themTinNhan("ai", "❌ Phản hồi không hợp lệ:\n" + text.substring(0, 200));
-                    return;
-                }
-                
-                themTinNhan("ai", data.reply, {
-                    word: data.word,
-                    excel: data.excel,
-                    pdf: data.pdf
-                });
-                
-                // Xóa tệp sau khi gửi xong
+                const d = await res.json();
+                themTinBaoCao('ai', d.reply || '', { word: d.word, excel: d.excel, pdf: d.pdf });
                 xoaTep();
-                
             } catch (e) {
-                themTinNhan("ai", "❌ Lỗi: " + (e.message || "Không xác định"));
+                themTinBaoCao('ai', '❌ Lỗi: ' + (e.message || 'Không xác định'));
             } finally {
-                nut.disabled = false;
-                nut.textContent = "➤";
+                btn.disabled = false; btn.textContent = '➤';
+            }
+        }
+
+        // === TRÒ CHUYỆN AI ===
+        function xuLyPhimChat(e) {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); guiChatTuDo(); }
+        }
+
+        function themTinChat(loai, nd) {
+            const kh = document.getElementById('khuChatTuDo');
+            const div = document.createElement('div');
+            div.className = 'message ' + loai;
+            const html = nd.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            div.innerHTML = `<div class="bubble">${html}</div>`;
+            kh.appendChild(div); kh.scrollTop = kh.scrollHeight;
+        }
+
+        async function guiChatTuDo() {
+            const inp = document.getElementById('inputChatTuDo');
+            const btn = document.getElementById('nutGuiChat');
+            const msg = inp.value.trim();
+            if (!msg) return;
+
+            themTinChat('user', msg);
+            inp.value = ''; btn.disabled = true; btn.textContent = '⏳';
+
+            try {
+                const res = await fetch('/api/chat-tu-do', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ message: msg })
+                });
+                const d = await res.json();
+                themTinChat('ai', d.reply || '❌ Không có phản hồi');
+            } catch (e) {
+                themTinChat('ai', '❌ Lỗi: ' + (e.message || 'Không xác định'));
+            } finally {
+                btn.disabled = false; btn.textContent = '➤';
             }
         }
     </script>
