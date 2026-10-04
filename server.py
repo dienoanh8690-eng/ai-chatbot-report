@@ -14,12 +14,11 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# ==================== CẤU HÌNH ĐÚNG THEO LỜI KHUYÊN GOOGLE ====================
+# ==================== CẤU HÌNH ====================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-3.5-flash"  # ✅ Đúng theo thông báo lỗi của Google
+GEMINI_MODEL = "gemini-3.5-flash"
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
-# === THƯ MỤC ===
 UPLOAD_FOLDER = "tai_lieu_tai_len"
 RESULT_FOLDER = "ket_qua_xuat_ra"
 KNOWLEDGE_FOLDER = "kho_kien_thuc"
@@ -33,7 +32,7 @@ if not os.path.exists(INDEX_FILE):
         json.dump({"tai_lieu": [], "ket_qua": []}, f, ensure_ascii=False, indent=2)
 
 
-# -------------------- ĐỌC FILE --------------------
+# ==================== ĐỌC FILE ====================
 def doc_file(duong_dan, dinh_dang):
     noi_dung = ""
     try:
@@ -55,7 +54,7 @@ def doc_file(duong_dan, dinh_dang):
     return noi_dung
 
 
-# -------------------- LƯU LỊCH SỬ --------------------
+# ==================== LƯU LỊCH SỬ ====================
 def luu_vao_kho(loai, ten_file, mo_ta):
     with open(INDEX_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -64,7 +63,7 @@ def luu_vao_kho(loai, ten_file, mo_ta):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# -------------------- TẠO FILE --------------------
+# ==================== TẠO FILE BÁO CÁO ====================
 def tao_word(noi_dung):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
@@ -135,7 +134,7 @@ def tao_pdf(noi_dung):
     return ten
 
 
-# -------------------- GỌI AI --------------------
+# ==================== GỌI AI ====================
 def goi_ai(noi_dung, file_content="", he_thong=""):
     if not GEMINI_API_KEY:
         return "⚠️ Chưa đặt GEMINI_API_KEY trên Render → vào Environment Variables thêm khóa."
@@ -156,7 +155,7 @@ Nội dung tệp:
         return f"❌ Lỗi kết nối: {str(e)}"
 
 
-# ==================== ROUTE ====================
+# ==================== ROUTE API ====================
 @app.route("/api/upload", methods=["POST"])
 def upload():
     if "file" not in request.files: return jsonify({"error": "Không có tệp"}), 400
@@ -175,18 +174,26 @@ def upload():
 
 @app.route("/api/chat-bao-cao", methods=["POST"])
 def chat_bao_cao():
-    data = request.json or {}
+    try:
+        data = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"reply": "❌ Dữ liệu gửi lên không hợp lệ!", "word":"", "excel":"", "pdf":""})
+    
     cau_hoi = data.get("message", "").strip()
     file_content = data.get("file_content", "")
+    
     if not cau_hoi and not file_content:
-        return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải tệp lên!"})
+        return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải tệp lên!", "word":"", "excel":"", "pdf":""})
+    
     tra_loi = goi_ai(cau_hoi, file_content, he_thong="Bạn là chuyên gia xử lý dữ liệu cho nhà máy thủy điện. Trả lời rõ ràng, có cấu trúc.")
+    
     word = excel = pdf = ""
     if "❌" not in tra_loi and "⚠️" not in tra_loi:
         word = tao_word(tra_loi)
         excel = tao_excel(tra_loi)
         pdf = tao_pdf(tra_loi)
         luu_vao_kho("ket_qua", word, cau_hoi[:100])
+    
     return jsonify({
         "reply": tra_loi,
         "word": f"/download/{word}" if word else "",
@@ -197,10 +204,15 @@ def chat_bao_cao():
 
 @app.route("/api/chat-tu-do", methods=["POST"])
 def chat_tu_do():
-    data = request.json or {}
+    try:
+        data = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"reply": "❌ Dữ liệu gửi lên không hợp lệ!"})
+    
     cau_hoi = data.get("message", "").strip()
     if not cau_hoi:
         return jsonify({"reply": "Vui lòng nhập câu hỏi!"})
+    
     tra_loi = goi_ai(cau_hoi, he_thong="Bạn là trợ lý AI thân thiện, trả lời bằng tiếng Việt tự nhiên, dễ hiểu.")
     return jsonify({"reply": tra_loi})
 
@@ -209,7 +221,8 @@ def chat_tu_do():
 def download(ten_file):
     for folder in [RESULT_FOLDER, UPLOAD_FOLDER]:
         path = os.path.join(folder, ten_file)
-        if os.path.exists(path): return send_file(path, as_attachment=True)
+        if os.path.exists(path): 
+            return send_file(path, as_attachment=True)
     return "Không tìm thấy tệp", 404
 
 
@@ -247,7 +260,7 @@ def trang_chu():
         .header h1 { font-size: 18px; font-weight: 600; }
         .header p { font-size: 13px; color: var(--text-2); }
 
-        /* Thanh quy trình — Đổi "Tải tệp" thành "Đăng nhập" */
+        /* Thanh quy trình */
         .process-bar {
             background: white; padding: 12px 24px; border-bottom: 1px solid var(--border);
             display: flex; justify-content: space-between; align-items: center;
@@ -257,10 +270,10 @@ def trang_chu():
         .step-number {
             width: 24px; height: 24px; border-radius: 50%; background: var(--bg);
             color: var(--text-2); display: flex; align-items: center; justify-content: center;
-            font-weight: 600; font-size: 12px;
+            font-weight: 600; font-size: 12px; transition: all 0.3s;
         }
         .step-number.active { background: var(--primary); color: white; }
-        .step-text { font-size: 13px; color: var(--text-2); }
+        .step-text { font-size: 13px; color: var(--text-2); transition: all 0.3s; }
         .step-text.active { color: var(--primary); font-weight: 500; }
 
         /* Bố cục chính */
@@ -460,7 +473,7 @@ def trang_chu():
             document.getElementById('chonTep').addEventListener('change', chonTep);
         });
 
-        // === QUY TRÌNH BÁO CÁO ===
+        // === CẬP NHẬT BƯỚC QUY TRÌNH ===
         function capNhatBuoc(n) {
             for (let i = 1; i <= 4; i++) {
                 const b = document.getElementById('buoc'+i);
@@ -473,6 +486,7 @@ def trang_chu():
             }
         }
 
+        // === TẢI TỆP ===
         function chonTep(e) {
             const f = e.target.files[0];
             if (!f) return;
@@ -500,6 +514,7 @@ def trang_chu():
             capNhatBuoc(1);
         }
 
+        // === NÚT NHANH ===
         function nhapYeuCauVaGui(text) {
             document.getElementById('inputBaoCao').value = text;
             guiBaoCao();
@@ -509,11 +524,18 @@ def trang_chu():
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); guiBaoCao(); }
         }
 
+        // === HIỂN THỊ TIN NHẮN BÁO CÁO ===
         function themTinBaoCao(loai, nd, links=null) {
             const kh = document.getElementById('khuBaoCao');
             const div = document.createElement('div');
             div.className = 'message ' + loai;
-            let html = nd.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            
+            // Chỉ hiển thị, KHÔNG gửi thẻ HTML vào backend
+            let noi_dung_hien = nd;
+            if (loai === 'user' && tenTepDaChon) {
+                noi_dung_hien = `<span class="file-tag">📎 ${tenTepDaChon}</span>\n${nd}`;
+            }
+            
             let linkHtml = '';
             if (links && (links.word||links.excel||links.pdf)) {
                 linkHtml = '<div class="download-row">';
@@ -522,34 +544,48 @@ def trang_chu():
                 if (links.pdf) linkHtml += `<a href="${links.pdf}" class="dl-btn dl-pdf" target="_blank">📕 PDF</a>`;
                 linkHtml += '</div>';
             }
-            div.innerHTML = `<div class="bubble">${html}${linkHtml}</div>`;
+            
+            div.innerHTML = `<div class="bubble">${noi_dung_hien.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace('&lt;span','<span').replace('&lt;/span&gt;','</span>')}${linkHtml}</div>`;
             kh.appendChild(div); kh.scrollTop = kh.scrollHeight;
+            
             if (loai === 'ai') {
                 capNhatBuoc(3);
                 if (links && (links.word||links.excel||links.pdf)) capNhatBuoc(4);
             }
         }
 
+        // === GỬI YÊU CẦU BÁO CÁO ===
         async function guiBaoCao() {
             const inp = document.getElementById('inputBaoCao');
             const btn = document.getElementById('nutGuiBaoCao');
             const msg = inp.value.trim();
+            
             if (!msg && !fileContent) return;
 
-            let hien = msg;
+            // Hiển thị có thẻ file-tag, nhưng chỉ gửi nội dung thuần vào backend
+            let hienThi = msg;
             if (tenTepDaChon) {
-                hien = `<span class="file-tag">📎 ${tenTepDaChon}</span>\n${msg || 'Phân tích nội dung tệp'}`;
+                hienThi = `<span class="file-tag">📎 ${tenTepDaChon}</span>\n${msg || 'Phân tích nội dung tệp'}`;
             }
-            themTinBaoCao('user', hien);
+            themTinBaoCao('user', hienThi);
+            
             inp.value = ''; btn.disabled = true; btn.textContent = '⏳';
 
             try {
+                // Gửi DỮ LIỆU THUẦN, KHÔNG có thẻ HTML
                 const res = await fetch('/api/chat-bao-cao', {
-                    method: 'POST', headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({ message: msg, file_content: fileContent })
+                    method: 'POST', 
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ 
+                        message: msg || 'Phân tích và xử lý nội dung tệp', 
+                        file_content: fileContent 
+                    })
                 });
+                
                 const d = await res.json();
                 themTinBaoCao('ai', d.reply || '', { word: d.word, excel: d.excel, pdf: d.pdf });
+                
+                // Xóa file sau khi xử lý xong
                 xoaTep();
             } catch (e) {
                 themTinBaoCao('ai', '❌ Lỗi: ' + (e.message || 'Không xác định'));
@@ -583,7 +619,8 @@ def trang_chu():
 
             try {
                 const res = await fetch('/api/chat-tu-do', {
-                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    method: 'POST', 
+                    headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({ message: msg })
                 });
                 const d = await res.json();
