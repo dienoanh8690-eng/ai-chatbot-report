@@ -40,10 +40,11 @@ def doc_file(duong_dan, dinh_dang):
             doc = Document(duong_dan)
             noi_dung = "\n".join([p.text for p in doc.paragraphs])
         elif dinh_dang == "xlsx":
-            wb = load_workbook(duong_dan, data_only=True)
+            wb = load_workbook(duong_dan, data_only=True, read_only=True)  # Tối ưu bộ nhớ
             ws = wb.active
             for hang in ws.iter_rows(values_only=True):
                 noi_dung += " | ".join(str(c) if c else "" for c in hang) + "\n"
+            wb.close()
         elif dinh_dang in ["txt", "md"]:
             with open(duong_dan, "r", encoding="utf-8", errors="ignore") as f:
                 noi_dung = f.read()
@@ -56,14 +57,17 @@ def doc_file(duong_dan, dinh_dang):
 
 # ==================== LƯU LỊCH SỬ ====================
 def luu_vao_kho(loai, ten_file, mo_ta):
-    with open(INDEX_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    data[loai].append({"ten": ten_file, "mo_ta": mo_ta, "ngay": datetime.now().strftime("%d/%m/%Y %H:%M")})
-    with open(INDEX_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        with open(INDEX_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data[loai].append({"ten": ten_file, "mo_ta": mo_ta, "ngay": datetime.now().strftime("%d/%m/%Y %H:%M")})
+        with open(INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # Bỏ qua lỗi lưu lịch sử để không ảnh hưởng chính
 
 
-# ==================== TẠO FILE BÁO CÁO — ĐÃ SỬA LỖI FONT ====================
+# ==================== TẠO FILE — TỐI ƯU BỘ NHỚ ====================
 def tao_word(noi_dung):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
@@ -83,13 +87,18 @@ def tao_word(noi_dung):
     
     doc.add_paragraph("-" * 60)
     
-    # Nội dung
+    # Nội dung — Tối ưu: giới hạn độ dài
+    dem = 0
     for dong in noi_dung.split("\n"):
         if dong.strip():
             p = doc.add_paragraph()
             run = p.add_run(dong.strip())
             run.font.name = "Arial"
             run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+            dem += 1
+            if dem > 200:  # Giới hạn số dòng để tiết kiệm RAM
+                p = doc.add_paragraph("... (nội dung đã rút gọn)")
+                break
     
     doc.save(duong_dan)
     return ten
@@ -100,15 +109,19 @@ def tao_excel(noi_dung=""):
     wb = Workbook()
     ws = wb.active
     ws.title = "DỮ LIỆU"
+    
     in_dam = Font(bold=True, size=11, name="Arial")
     vien = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
     can_giua = Alignment(horizontal='center', vertical='center')
+    
     ws.merge_cells("A1:I1")
     ws["A1"] = "BÁO CÁO DỮ LIỆU THIẾT BỊ"
     ws["A1"].font = Font(bold=True, size=14, color="0F4C81", name="Arial")
     ws["A1"].alignment = can_giua
+    
     ws.merge_cells("A2:I2")
     ws["A2"] = f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    
     cot = ["STT", "Mã TB", "Tên thiết bị", "Quy cách", "Đơn vị", "Số lượng", "Đơn giá", "Thành tiền", "Ghi chú"]
     for c, ten_cot in enumerate(cot, 1):
         cell = ws.cell(row=4, column=c, value=ten_cot)
@@ -116,53 +129,80 @@ def tao_excel(noi_dung=""):
         cell.alignment = can_giua
         cell.border = vien
         cell.fill = PatternFill("solid", fgColor="E6F2FF")
+    
     hang = 5
+    dem_dong = 0
     for dong in noi_dung.split("\n"):
         if dong.strip() and not dong.strip().startswith(("#", "---")):
             ws.merge_cells(start_row=hang, start_column=1, end_row=hang, end_column=9)
             ws.cell(row=hang, column=1, value=dong.strip())
             hang += 1
+            dem_dong += 1
+            if dem_dong > 100:  # Giới hạn tiết kiệm RAM
+                ws.merge_cells(start_row=hang, start_column=1, end_row=hang, end_column=9)
+                ws.cell(row=hang, column=1, value="... (dữ liệu đã rút gọn)")
+                break
+    
     for c, w in enumerate([6, 12, 25, 20, 10, 10, 14, 14, 20], 1):
         ws.column_dimensions[chr(64 + c)].width = w
+    
     wb.save(duong_dan)
     return ten
 
 def tao_pdf(noi_dung):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.pdf"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
+    
+    # Rút gọn nội dung trước khi tạo PDF
+    noi_dung_rut = noi_dung[:5000]
+    if len(noi_dung) > 5000:
+        noi_dung_rut += "\n\n... (nội dung đã rút gọn để tối ưu hóa)"
+    
     html = f"""
     <html><head><meta charset="utf-8"><style>
-        body {{ font-family: Arial; padding: 40px; line-height: 1.8; }}
-        h1 {{ text-align: center; color: #0F4C81; border-bottom: 2px solid #0F4C81; padding-bottom: 10px; }}
-        .ngay {{ text-align: right; color: #666; margin-bottom: 20px; }}
+        body {{ font-family: Arial; padding: 20px; line-height: 1.6; font-size: 12px; }}
+        h1 {{ text-align: center; color: #0F4C81; border-bottom: 2px solid #0F4C81; padding-bottom: 10px; font-size: 18px; }}
+        .ngay {{ text-align: right; color: #666; margin-bottom: 15px; font-size: 11px; }}
+        pre {{ white-space: pre-wrap; word-wrap: break-word; font-size: 11px; }}
     </style></head>
     <body>
         <h1>BÁO CÁO XỬ LÝ DỮ LIỆU</h1>
         <p class="ngay">Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
-        <hr><pre>{noi_dung}</pre>
+        <hr><pre>{noi_dung_rut}</pre>
     </body></html>"""
+    
     with open(duong_dan, "wb") as f:
         pisa.CreatePDF(html, dest=f)
     return ten
 
 
-# ==================== GỌI AI ====================
+# ==================== GỌI AI — XỬ LÝ LỖI 429 ====================
 def goi_ai(noi_dung, file_content="", he_thong=""):
     if not GEMINI_API_KEY:
         return "⚠️ Chưa đặt GEMINI_API_KEY trên Render → vào Environment Variables thêm khóa."
+    
     prompt = f"""{he_thong or "Bạn là trợ lý AI hữu ích, trả lời bằng tiếng Việt rõ ràng, dễ hiểu."}
 
 Yêu cầu: {noi_dung}
 Nội dung tệp:
-{file_content if file_content else '(Không có tệp)'}"""
+{file_content[:3000] if file_content else '(Không có tệp)'}"""  # Giới hạn độ dài gửi đi
+    
     try:
-        res = requests.post(GEMINI_API_URL, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=60)
+        res = requests.post(GEMINI_API_URL, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=120)
+        
+        if res.status_code == 429:
+            return "⚠️ API Gemini hết hạn sử dụng (quota). Vui lòng tạo khóa mới tại https://aistudio.google.com/apikey và cập nhật trên Render."
         if res.status_code != 200:
-            return f"❌ Lỗi API {res.status_code}: {res.text[:300]}"
+            return f"❌ Lỗi API {res.status_code}: {res.text[:200]}"
+        
         data = res.json()
         if "candidates" not in data:
-            return f"❌ Không có kết quả: {json.dumps(data, ensure_ascii=False)}"
+            return f"❌ Không có kết quả: {json.dumps(data, ensure_ascii=False)[:200]}"
+        
         return data["candidates"][0]["content"]["parts"][0]["text"]
+        
+    except requests.exceptions.Timeout:
+        return "⏳ Yêu cầu đang xử lý lâu hơn dự kiến, vui lòng thử lại sau."
     except Exception as e:
         return f"❌ Lỗi kết nối: {str(e)}"
 
@@ -173,14 +213,18 @@ def upload():
     if "file" not in request.files: return jsonify({"error": "Không có tệp"}), 400
     f = request.files["file"]
     if not f.filename: return jsonify({"error": "Chưa chọn tệp"}), 400
+    
     ext = f.filename.rsplit(".", 1)[-1].lower()
     if ext not in ["docx", "xlsx", "txt", "pdf"]:
         return jsonify({"error": "Chỉ hỗ trợ .docx .xlsx .txt .pdf"}), 400
+    
     ten_moi = f"{uuid.uuid4().hex[:10]}.{ext}"
     duong_dan = os.path.join(UPLOAD_FOLDER, ten_moi)
     f.save(duong_dan)
+    
     noi_dung = doc_file(duong_dan, ext)
     luu_vao_kho("tai_lieu", ten_moi, f.filename)
+    
     return jsonify({"status": "ok", "name": f.filename, "content": noi_dung[:3000]})
 
 
@@ -197,17 +241,17 @@ def chat_bao_cao():
     if not cau_hoi and not file_content:
         return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải tệp lên!", "word":"", "excel":"", "pdf":""})
     
-    tra_loi = goi_ai(cau_hoi, file_content, he_thong="Bạn là chuyên gia xử lý dữ liệu cho nhà máy thủy điện. Trả lời rõ ràng, có cấu trúc.")
+    tra_loi = goi_ai(cau_hoi, file_content, he_thong="Bạn là chuyên gia xử lý dữ liệu cho nhà máy thủy điện. Trả lời ngắn gọn, rõ ràng, có cấu trúc.")
     
     word = excel = pdf = ""
-    if "❌" not in tra_loi and "⚠️" not in tra_loi:
+    if "❌" not in tra_loi and "⚠️" not in tra_loi and "quota" not in tra_loi:
         try:
             word = tao_word(tra_loi)
             excel = tao_excel(tra_loi)
             pdf = tao_pdf(tra_loi)
             luu_vao_kho("ket_qua", word, cau_hoi[:100])
         except Exception as e:
-            return jsonify({"reply": f"✅ Xong! Nhưng lỗi tạo file: {str(e)}", "word":"", "excel":"", "pdf":""})
+            return jsonify({"reply": f"✅ AI trả lời xong!\nLỗi tạo file: {str(e)}", "word":"", "excel":"", "pdf":""})
     
     return jsonify({
         "reply": tra_loi,
@@ -228,7 +272,7 @@ def chat_tu_do():
     if not cau_hoi:
         return jsonify({"reply": "Vui lòng nhập câu hỏi!"})
     
-    tra_loi = goi_ai(cau_hoi, he_thong="Bạn là trợ lý AI thân thiện, trả lời bằng tiếng Việt tự nhiên, dễ hiểu.")
+    tra_loi = goi_ai(cau_hoi, he_thong="Bạn là trợ lý AI thân thiện, trả lời ngắn gọn, dễ hiểu.")
     return jsonify({"reply": tra_loi})
 
 
@@ -254,7 +298,7 @@ def trang_chu():
     <style>
         :root {
             --primary: #165DFF; --success: #00B42A; --danger: #F53F3F;
-            --bg: #F7F8FA; --card: #FFFFFF;
+            --warning: #FF7D00; --bg: #F7F8FA; --card: #FFFFFF;
             --bubble-user: #E8F3FF; --bubble-ai: #F2F3F5;
             --bubble-chat-user: #EDE7F6; --bubble-chat-ai: #F3E5F5;
             --text-1: #1D2129; --text-2: #4E5969; --border: #E5E6EB;
@@ -352,6 +396,8 @@ def trang_chu():
         .bao-cao .ai .bubble { background: var(--bubble-ai); border-bottom-left-radius: 4px; }
         .chat-tu-do .user .bubble { background: var(--bubble-chat-user); border-bottom-right-radius: 4px; }
         .chat-tu-do .ai .bubble { background: var(--bubble-chat-ai); border-bottom-left-radius: 4px; }
+        .bubble.warning { background: #FFF7E8; border-left: 3px solid var(--warning); }
+        .bubble.error { background: #FFF1F0; border-left: 3px solid var(--danger); }
 
         .file-tag {
             display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
@@ -545,7 +591,6 @@ def trang_chu():
             const div = document.createElement('div');
             div.className = 'message ' + loai;
             
-            // Chỉ hiển thị, KHÔNG gửi thẻ HTML vào backend
             let noi_dung_hien = nd;
             if (loai === 'user' && tenTepDaChon) {
                 noi_dung_hien = `<span class="file-tag">📎 ${tenTepDaChon}</span>\n${nd}`;
@@ -577,7 +622,6 @@ def trang_chu():
             
             if (!msg && !fileContent) return;
 
-            // Hiển thị có thẻ file-tag, nhưng chỉ gửi nội dung thuần vào backend
             let hienThi = msg;
             if (tenTepDaChon) {
                 hienThi = `<span class="file-tag">📎 ${tenTepDaChon}</span>\n${msg || 'Phân tích nội dung tệp'}`;
@@ -587,7 +631,6 @@ def trang_chu():
             inp.value = ''; btn.disabled = true; btn.textContent = '⏳';
 
             try {
-                // Gửi DỮ LIỆU THUẦN, KHÔNG có thẻ HTML
                 const res = await fetch('/api/chat-bao-cao', {
                     method: 'POST', 
                     headers: {'Content-Type':'application/json'},
@@ -600,8 +643,11 @@ def trang_chu():
                 const d = await res.json();
                 themTinBaoCao('ai', d.reply || '', { word: d.word, excel: d.excel, pdf: d.pdf });
                 
-                // Xóa file sau khi xử lý xong
-                xoaTep();
+                if (!d.word && !d.excel && !d.pdf && d.reply.includes('quota')) {
+                    // Giữ nguyên file để thử lại với key mới
+                } else {
+                    xoaTep();
+                }
             } catch (e) {
                 themTinBaoCao('ai', '❌ Lỗi: ' + (e.message || 'Không xác định'));
             } finally {
@@ -653,4 +699,5 @@ def trang_chu():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    port = int(os.environ.get("PORT", 10000))  # Dùng đúng cổng Render
+    app.run(host="0.0.0.0", port=port)
