@@ -5,7 +5,9 @@ import uuid
 import json
 from datetime import datetime
 from docx import Document
+from docx.oxml.ns import qn
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font, Alignment, Border, Side
 from xhtml2pdf import pisa
 from flask_cors import CORS
 
@@ -39,7 +41,6 @@ def doc_file(duong_dan, dinh_dang):
         elif dinh_dang == "xlsx":
             wb = load_workbook(duong_dan, data_only=True)
             ws = wb.active
-            noi_dung = ""
             for hang in ws.iter_rows(values_only=True):
                 noi_dung += " | ".join(str(c) if c else "" for c in hang) + "\n"
         elif dinh_dang in ["txt", "md"]:
@@ -65,61 +66,140 @@ def luu_vao_kho(loai, ten_file, mo_ta):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# -------------------- TẠO FILE WORD --------------------
+# -------------------- TẠO FILE WORD — Đúng Font Tiếng Việt --------------------
 def tao_word(noi_dung):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
     doc = Document()
-    doc.add_heading("BÁO CÁO XỬ LÝ DỮ LIỆU", 0)
-    doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    
+    # Tiêu đề
+    p = doc.add_heading("BÁO CÁO XỬ LÝ DỮ LIỆU THIẾT BỊ", 0)
+    for run in p.runs:
+        run.font.name = "Arial"
+        run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+    
+    p = doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    p.runs[0].font.name = "Arial"
+    p._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+    
     doc.add_paragraph("-" * 60)
+    
     for dong in noi_dung.split("\n"):
         if dong.strip():
-            doc.add_paragraph(dong)
+            p = doc.add_paragraph(dong)
+            p.runs[0].font.name = "Arial"
+            p._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+    
     doc.save(duong_dan)
     return ten
 
 
-# -------------------- TẠO FILE EXCEL --------------------
+# -------------------- TẠO FILE EXCEL — Bảng Đầy Đủ + Công Thức --------------------
 def tao_excel(noi_dung=""):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.xlsx"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
     wb = Workbook()
     ws = wb.active
-    ws.title = "Dữ liệu đã xử lý"
-    ws.append(["BÁO CÁO DỮ LIỆU THIẾT BỊ"])
-    ws.append([f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}"])
-    ws.append([])
+    ws.title = "DỮ LIỆU ĐÃ XỬ LÝ"
+    
+    # Định dạng
+    in_dam = Font(bold=True, size=11, name="Arial")
+    vien = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    can_giua = Alignment(horizontal='center', vertical='center')
+    can_trai = Alignment(horizontal='left', vertical='center')
+    
+    # Tiêu đề
+    ws.merge_cells("A1:I1")
+    ws["A1"] = "BÁO CÁO DỮ LIỆU THIẾT BỊ HỆ THỐNG"
+    ws["A1"].font = Font(bold=True, size=14, color="0F4C81", name="Arial")
+    ws["A1"].alignment = can_giua
+    
+    ws.merge_cells("A2:I2")
+    ws["A2"] = f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    ws["A2"].alignment = can_giua
+    
+    # Tiêu đề cột
+    cot = ["STT", "Mã thiết bị", "Tên thiết bị", "Quy cách", "Đơn vị", "Số lượng", "Đơn giá", "Thành tiền", "Ghi chú"]
+    vi_tri = 4
+    for c, ten_cot in enumerate(cot, 1):
+        cell = ws.cell(row=vi_tri, column=c, value=ten_cot)
+        cell.font = in_dam
+        cell.alignment = can_giua
+        cell.border = vien
+    
+    # Nội dung báo cáo -> tách thành các mục
+    hang = vi_tri + 1
     for dong in noi_dung.split("\n"):
-        if dong.strip():
-            ws.append([dong.strip()])
+        if dong.strip() and not dong.strip().startswith(("#", "---", "==")):
+            ws.merge_cells(start_row=hang, start_column=1, end_row=hang, end_column=9)
+            cell = ws.cell(row=hang, column=1, value=dong.strip())
+            cell.alignment = can_trai
+            hang += 1
+    
+    # Dòng tổng cộng
+    hang_tong = hang + 2
+    ws.merge_cells(f"A{hang_tong}:G{hang_tong}")
+    ws[f"A{hang_tong}"] = "TỔNG GIÁ TRỊ"
+    ws[f"A{hang_tong}"].font = Font(bold=True, size=12, color="991B1B", name="Arial")
+    
+    # Độ rộng cột
+    rong = [6, 12, 25, 20, 10, 10, 14, 14, 20]
+    for c, w in enumerate(rong, 1):
+        ws.column_dimensions[chr(64 + c)].width = w
+    
     wb.save(duong_dan)
     return ten
 
 
-# -------------------- TẠO FILE PDF --------------------
+# -------------------- TẠO FILE PDF — Font Tiếng Việt Đúng --------------------
 def tao_pdf(noi_dung):
     ten = f"bao_cao_{uuid.uuid4().hex[:8]}.pdf"
     duong_dan = os.path.join(RESULT_FOLDER, ten)
+    
     html = f"""
-    <html><head><meta charset="utf-8"><style>
-        body {{ font-family: Arial; padding: 25px; line-height: 1.6; }}
-        h1 {{ text-align: center; color: #0f4c81; border-bottom: 2px solid #0f4c81; padding-bottom: 10px; }}
-        .ngay {{ text-align: right; color: #666; margin-bottom: 20px; }}
-    </style></head>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            @font-face {{
+                font-family: 'DejaVu Sans';
+                src: url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
+            }}
+            body {{ 
+                font-family: 'DejaVu Sans', Arial, sans-serif; 
+                padding: 40px; 
+                line-height: 1.8;
+                font-size: 14px;
+            }}
+            h1 {{ 
+                text-align: center; 
+                color: #0F4C81; 
+                border-bottom: 2px solid #0F4C81; 
+                padding-bottom: 10px;
+                margin-bottom: 20px;
+            }}
+            .ngay {{ text-align: right; color: #666; margin-bottom: 30px; }}
+            hr {{ border: 1px solid #ccc; margin: 20px 0; }}
+            pre {{ white-space: pre-wrap; font-family: inherit; }}
+        </style>
+    </head>
     <body>
-        <h1>BÁO CÁO XỬ LÝ DỮ LIỆU</h1>
-        <p class="ngay">Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+        <h1>BÁO CÁO XỬ LÝ DỮ LIỆU THIẾT BỊ</h1>
+        <p class="ngay">Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
         <hr>
-        <p>{noi_dung.replace(chr(10), '<br>')}</p>
-    </body></html>
+        <pre>{noi_dung}</pre>
+    </body>
+    </html>
     """
     with open(duong_dan, "wb") as f:
-        pisa.CreatePDF(html, dest=f)
+        pisa.CreatePDF(html, dest=f, encoding="utf-8")
     return ten
 
 
-# -------------------- GỌI AI --------------------
+# -------------------- GỌI AI — Yêu cầu rõ ràng hơn --------------------
 def goi_ai(noi_dung, file_content=""):
     if not GEMINI_API_KEY:
         return "⚠️ Chưa đặt GEMINI_API_KEY"
@@ -133,12 +213,25 @@ Nội dung file đính kèm:
 {file_content if file_content else '(Không có file)'}
 
 ---
-Hãy thực hiện đúng yêu cầu:
-1. Kiểm tra, chỉnh sửa dữ liệu: đúng tên, đúng hàng, đúng cột
-2. Sắp xếp theo thứ tự A-Z theo tên/mã trong từng hệ thống
-3. Tính toán tổng hợp giá trị, thành tiền = đơn giá × số lượng, tổng cộng
-4. Trình bày rõ ràng, có cấu trúc, dễ xem trên màn hình
-5. Kết quả trình bày đầy đủ ngay bên dưới, không tóm tắt
+Thực hiện chính xác theo các bước sau:
+
+1. **Đánh giá dữ liệu đầu vào**:
+   - Kiểm tra cấu trúc dữ liệu: hệ thống, thiết bị, số lượng, đơn giá...
+   - Ghi rõ những điểm đúng, những điểm cần bổ sung/sửa
+
+2. **Chuẩn hóa dữ liệu**:
+   - Sửa lỗi chính tả, thống nhất định dạng ngày tháng, đơn vị tính
+   - Sắp xếp danh sách thiết bị theo thứ tự A-Z theo tên hoặc mã thiết bị
+
+3. **Tính toán**:
+   - Thành tiền = Số lượng × Đơn giá
+   - Tính tổng giá trị toàn bộ danh sách
+   - Liệt kê rõ các thiết bị thiếu số lượng, thiếu đơn giá
+
+4. **Trình bày báo cáo**:
+   - Viết bằng tiếng Việt chuẩn, không lỗi font, rõ ràng
+   - Cấu trúc: Mục đích → Đánh giá → Dữ liệu đã sắp xếp & tính toán → Kết luận
+   - Trình bày chi tiết, đầy đủ, dễ đọc trên màn hình
 """
     
     try:
@@ -157,7 +250,6 @@ Hãy thực hiện đúng yêu cầu:
 
 # ==================== ROUTE ====================
 
-# Tải file lên
 @app.route("/api/upload", methods=["POST"])
 def upload():
     if "file" not in request.files:
@@ -180,7 +272,6 @@ def upload():
     return jsonify({"status": "ok", "name": f.filename, "content": noi_dung[:3000]})
 
 
-# Chat & xử lý
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.json
@@ -207,7 +298,6 @@ def chat():
     })
 
 
-# Tải file về
 @app.route("/download/<ten_file>")
 def download(ten_file):
     for folder in [RESULT_FOLDER, UPLOAD_FOLDER]:
@@ -217,7 +307,6 @@ def download(ten_file):
     return "Không tìm thấy file", 404
 
 
-# Trang chủ
 @app.route("/")
 def trang_chu():
     return """
@@ -233,7 +322,6 @@ def trang_chu():
         h1 { text-align: center; color: #0f4c81; margin-bottom: 30px; }
         .box { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         
-        /* Khu tải file */
         .upload-area { border: 2px dashed #94b8d9; padding: 25px; text-align: center; border-radius: 10px; cursor: pointer; margin-bottom: 15px; transition: 0.3s; }
         .upload-area:hover { border-color: #0f4c81; background: #e6f2ff; }
         .upload-area.active { border-color: #22c55e; background: #f0fdf4; }
@@ -244,12 +332,10 @@ def trang_chu():
         button:hover { background: #0d3c68; }
         button:disabled { background: #94b8d9; cursor: not-allowed; }
         
-        /* Kết quả hiển thị */
         .result-section { margin-top: 25px; display: none; }
         .result-label { font-weight: bold; color: #0f4c81; margin-bottom: 10px; font-size: 16px; }
         .result-box { padding: 20px; background: #f8fbff; border-radius: 8px; border-left: 4px solid #0f4c81; white-space: pre-wrap; line-height: 1.7; max-height: 500px; overflow-y: auto; margin-bottom: 20px; }
         
-        /* Nút tải */
         .download-box { padding: 15px 20px; background: #f0f9ff; border-radius: 8px; border: 1px solid #cce0f0; display: none; }
         .download-label { font-weight: bold; color: #0f4c81; margin-bottom: 12px; }
         .download-buttons { display: flex; gap: 12px; flex-wrap: wrap; }
@@ -263,7 +349,6 @@ def trang_chu():
 <body>
     <h1>⚡ All thủy điện</h1>
     <div class="box">
-        <!-- Tải file -->
         <div class="upload-area" id="khuTai" onclick="document.getElementById('chonFile').click()">
             <strong>📎 Tải file tài liệu lên</strong><br>
             <span style="color:#666; font-size:13px;">.docx .xlsx .txt .pdf</span>
@@ -271,19 +356,15 @@ def trang_chu():
         </div>
         <div class="file-info" id="thongTinFile">✅ Đã chọn: <span id="tenFile"></span></div>
         
-        <!-- Ô nhập yêu cầu -->
-        <textarea id="cauhoi" placeholder="Nhập yêu cầu: kiểm tra dữ liệu, sắp xếp A-Z, tính thành tiền, tổng cộng..."></textarea>
+        <textarea id="cauhoi" placeholder="Ví dụ: Sắp xếp danh sách thiết bị A-Z, tính thành tiền, tổng cộng..."></textarea>
         
-        <!-- Nút gửi -->
         <button id="nutGui" onclick="gui()">Gửi & Phân tích</button>
         
-        <!-- Kết quả xem trước -->
         <div class="result-section" id="phanKetQua">
             <div class="result-label">📋 Kết quả xử lý:</div>
             <div class="result-box" id="ketQua"></div>
         </div>
         
-        <!-- Nút tải file -->
         <div class="download-box" id="khuTaiVe">
             <div class="download-label">💾 Tải kết quả về máy:</div>
             <div class="download-buttons">
@@ -300,20 +381,15 @@ def trang_chu():
         async function xuLyFile(input) {
             const file = input.files[0];
             if (!file) return;
-            
             const khu = document.getElementById("khuTai");
             const thongTin = document.getElementById("thongTinFile");
-            
             khu.classList.add("active");
             khu.innerHTML = "⏳ Đang đọc file...";
-            
             const formData = new FormData();
             formData.append("file", file);
-            
             try {
                 const res = await fetch("/api/upload", { method: "POST", body: formData });
                 const data = await res.json();
-                
                 if (data.status === "ok") {
                     fileContent = data.content;
                     khu.innerHTML = "✅ Sẵn sàng nhận file";
@@ -339,7 +415,6 @@ def trang_chu():
                 return;
             }
             
-            // Reset giao diện
             nut.disabled = true;
             nut.textContent = "⏳ Đang xử lý...";
             phanKetQua.style.display = "none";
@@ -352,12 +427,8 @@ def trang_chu():
                     body: JSON.stringify({ message: cauhoi, file_content: fileContent })
                 });
                 const data = await res.json();
-                
-                // Hiển thị kết quả xem trước
                 ketQua.textContent = data.reply || "Không có phản hồi";
                 phanKetQua.style.display = "block";
-                
-                // Hiển thị nút tải
                 if (data.word || data.excel || data.pdf) {
                     khuTaiVe.style.display = "block";
                     if (data.word) document.getElementById("btnWord").href = data.word;
