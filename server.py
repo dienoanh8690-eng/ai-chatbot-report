@@ -765,4 +765,6 @@ async function sendEquip(){
     const m = i.value.trim(); if(!m && !file4Content) return;
     addMsg("chat4","user",m||"Phân tích thiết bị"); i.value="";
     document.getElementById("btn4").disabled=true; document.getElementById("btn4").textContent="⏳";
-    const r = await fetch("/api/chat-equip", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:m, file_content:file
+    const r = await fetch("/api/chat-equip", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:m, file_content:file4Content})});
+    const d = await r.json(); addMsg("chat4","ai",d.reply);
+    document.getElementById("btn4").disabled=false;
