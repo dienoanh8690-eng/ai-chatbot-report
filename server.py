@@ -767,4 +767,4 @@ async function sendEquip(){
     document.getElementById("btn4").disabled=true; document.getElementById("btn4").textContent="⏳";
     const r = await fetch("/api/chat-equip", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:m, file_content:file4Content})});
     const d = await r.json(); addMsg("chat4","ai",d.reply);
-    document.getElementById("btn4").disabled=false;
+    document.getElementById("btn4").disabled=false; document.getElementById("
