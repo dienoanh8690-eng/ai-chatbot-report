@@ -1,6 +1,3 @@
-# ==================================================
-# IMPORT — ĐÚNG THỨ TỰ
-# ==================================================
 from flask import Flask, request, jsonify, send_file
 import requests
 import os
@@ -11,48 +8,38 @@ from docx.oxml.ns import qn
 from openpyxl import Workbook, load_workbook
 from flask_cors import CORS
 
-# ==================================================
-# KHỞI TẠO APP
-# ==================================================
 app = Flask(__name__)
 CORS(app)
 
 # ==================================================
-# CẤU HÌNH — ĐÚNG TÊN MODEL ✅
+# CẤU HÌNH API KEY
 # ==================================================
-
-# AIML / DOLA — ƯU TIÊN SỐ 1
 AI_API_KEY = os.environ.get("AI_API_KEY", "").strip()
 AI_URL = "https://api.aimlapi.com/v1/chat/completions"
 AI_MODEL = "bytedance/dola-seed-2-0-pro"
 
-# Gemini
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = "gemini-2.0-flash-exp"
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
-# Groq / Llama
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3-1-8b-instant"
 
-# OpenAI / GPT
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 OPENAI_MODEL = "gpt-3.5-turbo"
 
-# Claude
 CLAUDE_API_KEY = os.environ.get("CLAUDE", "").strip()
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
-# Thư mục
 UPLOAD_FOLDER = "tai_lieu_tai_len"
 RESULT_FOLDER = "ket_qua_xuat_ra"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 # ==================================================
-# HÀM GỌI TỪNG AI — TRẢ VỀ (tên, kết quả, lỗi)
+# HÀM GỌI TỪNG AI
 # ==================================================
 def goi_aiml(prompt, he_thong=""):
     if not AI_API_KEY:
@@ -171,11 +158,7 @@ def goi_claude(prompt, he_thong=""):
         return "Claude", None, f"Lỗi kết nối: {str(e)}"
 
 
-# ==================================================
-# LUỒNG GỌI — ĐÚNG THỨ TỰ TỪNG MỤC ✅
-# ==================================================
 def goi_theo_danh_sach(prompt, danh_sach_ham, he_thong=""):
-    """Chạy tuần tự, trả về AI đầu tiên thành công"""
     loi_tong = []
     for ham in danh_sach_ham:
         ten, kq, loi = ham(prompt, he_thong=he_thong)
@@ -186,22 +169,8 @@ def goi_theo_danh_sach(prompt, danh_sach_ham, he_thong=""):
 
 
 # ==================================================
-# ĐỌC GOOGLE SHEETS & TẠO TỆP
+# TẠO TỆP WORD & EXCEL
 # ==================================================
-def doc_google_sheet(sheet_url):
-    try:
-        if "docs.google.com/spreadsheets/d/" not in sheet_url:
-            return None, "❌ Link không đúng định dạng Google Sheets"
-        sheet_id = sheet_url.split("/d/")[1].split("/")[0]
-        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
-        res = requests.get(csv_url, timeout=30)
-        if res.status_code == 200:
-            return res.text, None
-        return None, "❌ Không đọc được Sheet → Kiểm tra quyền chia sẻ: Bất kỳ ai có link"
-    except Exception as e:
-        return None, f"❌ Lỗi đọc Sheet: {str(e)}"
-
-
 def tao_word(noi_dung):
     try:
         ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
@@ -244,10 +213,23 @@ def tao_excel(noi_dung=""):
         return ""
 
 
-# ==================================================
-# ROUTE API — ĐÚNG AI CHO TỪNG MỤC ✅
-# ==================================================
+def doc_google_sheet(sheet_url):
+    try:
+        if "docs.google.com/spreadsheets/d/" not in sheet_url:
+            return None, "❌ Link không đúng định dạng Google Sheets"
+        sheet_id = sheet_url.split("/d/")[1].split("/")[0]
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+        res = requests.get(csv_url, timeout=30)
+        if res.status_code == 200:
+            return res.text, None
+        return None, "❌ Không đọc được Sheet → Kiểm tra quyền chia sẻ: Bất kỳ ai có link"
+    except Exception as e:
+        return None, f"❌ Lỗi đọc Sheet: {str(e)}"
 
+
+# ==================================================
+# API ROUTES
+# ==================================================
 @app.route("/api/upload", methods=["POST"])
 def upload():
     if "file" not in request.files:
@@ -285,6 +267,21 @@ def connect_sheet():
     return jsonify({"status": "ok", "content": noi_dung[:5000]})
 
 
+# ===== 🔵 MỚI: TRÒ CHUYỆN CHUNG =====
+@app.route("/api/chat-general", methods=["POST"])
+def chat_general():
+    """💬 Trò chuyện chung — DOLA/AIML → Gemini → GPT → Claude"""
+    data = request.get_json(silent=True) or {}
+    msg = data.get("message", "").strip()
+    if not msg:
+        return jsonify({"reply": "Vui lòng nhập câu hỏi!"})
+    he_thong = "Bạn là trợ lý AI tổng hợp, thông minh, hữu ích. Trả lời rõ ràng, dễ hiểu, bằng tiếng Việt."
+    
+    danh_sach = [goi_aiml, goi_gemini, goi_gpt, goi_claude]
+    tra_loi = goi_theo_danh_sach(msg, danh_sach, he_thong)
+    return jsonify({"reply": tra_loi})
+
+
 @app.route("/api/chat-data", methods=["POST"])
 def chat_data():
     """📊 Xử lý dữ liệu — DOLA/AIML → Gemini → Llama/Groq"""
@@ -298,7 +295,7 @@ def chat_data():
     prompt = f"{msg}\n\nDữ liệu phân tích:\n{full_data}" if full_data else msg
     he_thong = "Bạn là chuyên gia phân tích dữ liệu và tạo báo cáo. Trả lời rõ ràng, tóm tắt số liệu quan trọng, dùng bảng khi phù hợp."
     
-    danh_sach = [goi_aiml, goi_gemini, goi_groq]  # ✅ KHÔNG CÓ CLAUDE
+    danh_sach = [goi_aiml, goi_gemini, goi_groq]
     tra_loi = goi_theo_danh_sach(prompt, danh_sach, he_thong)
     
     word = tao_word(tra_loi) if "✅" in tra_loi else ""
@@ -319,7 +316,7 @@ def chat_doc():
         return jsonify({"reply": "Vui lòng nhập yêu cầu soạn thảo!"})
     he_thong = "Bạn là chuyên gia soạn thảo văn bản hành chính, hợp đồng, thư từ. Viết chuẩn mực, đúng thể thức Việt Nam."
     
-    danh_sach = [goi_aiml, goi_gpt, goi_claude]  # ✅ ĐÚNG: có Claude ở cuối
+    danh_sach = [goi_aiml, goi_gpt, goi_claude]
     tra_loi = goi_theo_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
@@ -333,7 +330,7 @@ def chat_tender():
         return jsonify({"reply": "Vui lòng nhập yêu cầu về quy trình đấu thầu!"})
     he_thong = "Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, hồ sơ, lưu ý pháp lý."
     
-    danh_sach = [goi_aiml, goi_gemini, goi_groq]  # ✅ KHÔNG CÓ CLAUDE
+    danh_sach = [goi_aiml, goi_gemini, goi_groq]
     tra_loi = goi_theo_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
@@ -349,7 +346,7 @@ def chat_equip():
         return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải danh sách thiết bị!"})
     he_thong = "Bạn là chuyên gia quản lý thiết bị nhà máy. Phân loại, theo dõi tình trạng, đề xuất bảo trì, tính tuổi thọ."
     
-    danh_sach = [goi_aiml, goi_gemini, goi_groq]  # ✅ KHÔNG CÓ CLAUDE
+    danh_sach = [goi_aiml, goi_gemini, goi_groq]
     tra_loi = goi_theo_danh_sach(full_prompt, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
@@ -377,6 +374,7 @@ def trang_chu():
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
+--gen: #6366f1; --gen-light: #e0e7ff; --gen-bg: #eef2ff;
 --p1: #2563eb; --p1-light: #dbeafe; --p1-bg: #eff6ff;
 --p2: #16a34a; --p2-light: #dcfce7; --p2-bg: #f0fdf4;
 --p3: #9333ea; --p3-light: #f3e8ff; --p3-bg: #faf5ff;
@@ -392,28 +390,33 @@ body { background: linear-gradient(135deg, #f0f7ff 0%, #faf5ff 100%); min-height
 .header { text-align: center; margin-bottom: 28px; padding-top: 10px; }
 .header h1 { font-size: 26px; font-weight: 700; color: var(--gray-800); margin-bottom: 6px; }
 .header p { color: var(--gray-600); font-size: 14px; }
-.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; max-width: 1920px; margin: 0 auto; }
-@media (max-width: 1400px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+.grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 22px; max-width: 2200px; margin: 0 auto; }
+@media (max-width: 1600px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 1000px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
 .card { background: white; border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-md); display: flex; flex-direction: column; height: calc(100vh - 160px); min-height: 650px; transition: transform 0.2s, box-shadow 0.2s; }
 .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.card-gen { border-top: 4px solid var(--gen); }
 .card-p1 { border-top: 4px solid var(--p1); }
 .card-p2 { border-top: 4px solid var(--p2); }
 .card-p3 { border-top: 4px solid var(--p3); }
 .card-p4 { border-top: 4px solid var(--p4); }
 .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 2px solid; }
+.card-gen .card-head { border-bottom-color: var(--gen-light); }
 .card-p1 .card-head { border-bottom-color: var(--p1-light); }
 .card-p2 .card-head { border-bottom-color: var(--p2-light); }
 .card-p3 .card-head { border-bottom-color: var(--p3-light); }
 .card-p4 .card-head { border-bottom-color: var(--p4-light); }
 .card-icon { font-size: 24px; }
 .card-title { font-size: 17px; font-weight: 700; }
+.card-gen .card-title { color: var(--gen); }
 .card-p1 .card-title { color: var(--p1); }
 .card-p2 .card-title { color: var(--p2); }
 .card-p3 .card-title { color: var(--p3); }
 .card-p4 .card-title { color: var(--p4); }
 .card-ai { font-size: 11px; color: #94a3b8; margin-left: auto; background: var(--gray-100); padding: 3px 8px; border-radius: 12px; }
-.upload-zone { border: 2px dashed var(--gray-200); border-radius: var(--radius-md); padding: 18px; text-align: center; cursor: pointer; margin-bottom: 12px; transition: all 0.25s; }
+.upload-zone { border: 2px dashed var(--gray-200); border-radius: var(--radius-md); padding: 14px; text-align: center; cursor: pointer; margin-bottom: 12px; transition: all 0.25s; }
+.upload-zone:hover { border-color: var(--gen); background: var(--gen-bg); }
 .card-p1 .upload-zone:hover { border-color: var(--p1); background: var(--p1-bg); }
 .card-p4 .upload-zone:hover { border-color: var(--p4); background: var(--p4-bg); }
 .upload-zone p { font-size: 13px; color: var(--gray-600); }
@@ -428,6 +431,7 @@ body { background: linear-gradient(135deg, #f0f7ff 0%, #faf5ff 100%); min-height
 .sheet-bar button:hover { background: #1d4ed8; }
 .quick-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
 .q-btn { padding: 10px 12px; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); background: white; cursor: pointer; font-size: 12px; transition: all 0.2s; text-align: left; line-height: 1.4; }
+.card-gen .q-btn:hover { border-color: var(--gen); background: var(--gen-bg); transform: translateY(-1px); }
 .card-p1 .q-btn:hover { border-color: var(--p1); background: var(--p1-bg); transform: translateY(-1px); }
 .card-p2 .q-btn:hover { border-color: var(--p2); background: var(--p2-bg); transform: translateY(-1px); }
 .card-p3 .q-btn:hover { border-color: var(--p3); background: var(--p3-bg); transform: translateY(-1px); }
@@ -449,12 +453,14 @@ body { background: linear-gradient(135deg, #f0f7ff 0%, #faf5ff 100%); min-height
 .dl-excel { background: var(--p2-light); color: #15803d; }
 .input-row { display: flex; gap: 10px; align-items: flex-end; }
 textarea { flex: 1; min-height: 48px; max-height: 120px; padding: 12px 18px; border: 1px solid var(--gray-200); border-radius: 24px; font-size: 14px; resize: none; outline: none; transition: all 0.2s; line-height: 1.5; }
-textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+.card-p1 textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
 .card-p2 textarea:focus { border-color: var(--p2); box-shadow: 0 0 0 3px rgba(22,163,74,0.1); }
 .card-p3 textarea:focus { border-color: var(--p3); box-shadow: 0 0 0 3px rgba(147,51,234,0.1); }
 .card-p4 textarea:focus { border-color: var(--p4); box-shadow: 0 0 0 3px rgba(245,158,11,0.1); }
 .send-btn { width: 44px; height: 44px; border-radius: 50%; border: none; color: white; cursor: pointer; font-size: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
 .send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.card-gen .send-btn { background: var(--gen); }
 .card-p1 .send-btn { background: var(--p1); }
 .card-p2 .send-btn { background: var(--p2); }
 .card-p3 .send-btn { background: var(--p3); }
@@ -466,11 +472,36 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 <body>
 <div class="header">
 <h1>⚡ All Thủy Điện — Hệ thống hỗ trợ toàn diện</h1>
-<p>Phân tích dữ liệu · Soạn thảo văn bản · Tư vấn đấu thầu · Quản lý thiết bị</p>
+<p>Trò chuyện chung · Phân tích dữ liệu · Soạn thảo văn bản · Tư vấn đấu thầu · Quản lý thiết bị</p>
 </div>
 <div class="grid">
 
-<!-- CỘT 1: XỬ LÝ DỮ LIỆU & TẠO BÁO CÁO -->
+<!-- 🔵 MỚI: TRÒ CHUYỆN CHUNG -->
+<div class="card card-gen">
+<div class="card-head">
+<span class="card-icon">💬</span>
+<h3 class="card-title">Trò chuyện chung</h3>
+<span class="card-ai">DOLA/AIML → Gemini → GPT → Claude</span>
+</div>
+
+<div class="quick-btns">
+<button class="q-btn" onclick="quickGen('Giải thích khái niệm về nhà máy thủy điện')">🔌 Thủy điện cơ bản</button>
+<button class="q-btn" onclick="quickGen('Tóm tắt tin tức công nghệ mới nhất')">📰 Tin tức & Công nghệ</button>
+<button class="q-btn" onclick="quickGen('Đề xuất ý tưởng tối ưu hóa hiệu suất làm việc')">💡 Ý tưởng & Đề xuất</button>
+<button class="q-btn" onclick="quickGen('Giải đáp thắc mắc chung về pháp luật')">⚖️ Pháp luật chung</button>
+</div>
+
+<div class="chat-area" id="chat0">
+<div class="msg ai"><div class="bubble">👋 Xin chào! Tôi là trợ lý AI tổng hợp. Bạn có thể hỏi bất kỳ điều gì, tôi sẽ cố gắng trả lời nhanh nhất nhé!</div></div>
+</div>
+
+<div class="input-row">
+<textarea id="input0" placeholder="Hỏi bất kỳ điều gì..." onkeydown="handleKey(event, sendGen)"></textarea>
+<button class="send-btn" id="btn0" onclick="sendGen()">➤</button>
+</div>
+</div>
+
+<!-- 📊 XỬ LÝ DỮ LIỆU & TẠO BÁO CÁO -->
 <div class="card card-p1">
 <div class="card-head">
 <span class="card-icon">📊</span>
@@ -513,7 +544,7 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 </div>
 </div>
 
-<!-- CỘT 2: SOẠN THẢO VĂN BẢN -->
+<!-- ✍️ SOẠN THẢO VĂN BẢN -->
 <div class="card card-p2">
 <div class="card-head">
 <span class="card-icon">✍️</span>
@@ -538,7 +569,7 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 </div>
 </div>
 
-<!-- CỘT 3: QUY TRÌNH ĐẤU THẦU -->
+<!-- 🏆 QUY TRÌNH ĐẤU THẦU -->
 <div class="card card-p3">
 <div class="card-head">
 <span class="card-icon">🏆</span>
@@ -563,7 +594,7 @@ textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0
 </div>
 </div>
 
-<!-- CỘT 4: QUẢN LÝ THIẾT BỊ -->
+<!-- 🔧 QUẢN LÝ THIẾT BỊ -->
 <div class="card card-p4">
 <div class="card-head">
 <span class="card-icon">🔧</span>
@@ -658,6 +689,18 @@ function dlLinks(d){
     if(d.excel) h += `<a href="${d.excel}" class="dl-btn dl-excel" target="_blank">📊 Tải Excel</a>`;
     return h ? `<div class="dl-group">${h}</div>` : '';
 }
+
+// ===== TRÒ CHUYỆN CHUNG =====
+async function sendGen(){
+    const i = document.getElementById('input0');
+    const m = i.value.trim(); if(!m) return;
+    addMsg('chat0','user',m); i.value='';
+    document.getElementById('btn0').disabled=true; document.getElementById('btn0').textContent='⏳';
+    const r = await fetch('/api/chat-general', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:m})});
+    const d = await r.json(); addMsg('chat0','ai',d.reply);
+    document.getElementById('btn0').disabled=false; document.getElementById('btn0').textContent='➤';
+}
+function quickGen(t){ document.getElementById('input0').value=t; sendGen(); }
 
 async function sendData(){
     const i = document.getElementById('input1');
