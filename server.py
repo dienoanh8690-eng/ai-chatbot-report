@@ -11,56 +11,83 @@ app = Flask(__name__)
 CORS(app)
 
 # ==================================================
-# CẤU HÌNH — Điền trên Render → Environment Variables
+# Sử dụng TRỰC TIẾP khóa bạn đã có trên Render
 # ==================================================
-# Router AI / AIML API — lấy khóa tại: https://aimlapi.com
-ROUTER_API_KEY = os.environ.get("AI_API_KEY", "").strip()
-ROUTER_URL = "https://api.aimlapi.com/v1/chat/completions"
-# Các model dự phòng — tự động chuyển nếu 1 cái bận
-MODEL_LIST = [
-    "google/gemini-2.5-flash",
-    "bytedance/dola-seed-2-0-pro",
-    "meta-llama/llama-3.2-1b-instruct",
-    "mistralai/mistral-7b-instruct-v0.3"
-]
+# Gemini — khóa dạng AQ. → dùng endpoint v1beta
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-exp-03-25:generateContent"
+GEMINI_FULL_URL = f"{GEMINI_URL}?key={GEMINI_API_KEY}"
+
+# Groq/Llama — khóa miễn phí, tốc độ nhanh
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = "llama-3.1-8b-instant"
 
 RESULT_FOLDER = "bao_cao_xuat_ra"
 os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 # ==================================================
-# HÀM GỌI ROUTER AI — TỰ ĐỘNG CHUYỂN MODEL
+# GỌI GEMINI
 # ==================================================
-def goi_router(prompt, he_thong=""):
-    if not ROUTER_API_KEY:
-        return None, "⚠️ Chưa đặt AI_API_KEY trên Render"
-    
-    loi = []
-    for model in MODEL_LIST:
-        try:
-            res = requests.post(
-                ROUTER_URL,
-                headers={
-                    "Authorization": f"Bearer {ROUTER_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt rõ ràng, dễ hiểu."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 1024
-                },
-                timeout=30
-            )
-            if res.status_code == 200:
-                return f"✅ [{model.split('/')[-1]}]\n" + res.json()["choices"][0]["message"]["content"], None
-            loi.append(f"{model}: Lỗi {res.status_code}")
-        except Exception as e:
-            loi.append(f"{model}: {str(e)}")
-    
-    return None, "❌ Tất cả đều không trả lời:\n" + "\n".join(loi)
+def goi_gemini(prompt, he_thong=""):
+    if not GEMINI_API_KEY:
+        return None, "⚠️ Chưa có GEMINI_API_KEY"
+    try:
+        full = f"{he_thong}\n\nYêu cầu: {prompt}" if he_thong else prompt
+        res = requests.post(
+            GEMINI_FULL_URL,
+            json={"contents": [{"parts": [{"text": full}]}]},
+            timeout=30
+        )
+        if res.status_code == 200:
+            data = res.json()
+            if "candidates" in data:
+                return f"✅ [Gemini 2.5]\n" + data["candidates"][0]["content"]["parts"][0]["text"], None
+        return None, f"Gemini: Lỗi {res.status_code}"
+    except Exception as e:
+        return None, f"Gemini: {str(e)}"
+
+# ==================================================
+# GỌI GROQ/LLAMA
+# ==================================================
+def goi_groq(prompt, he_thong=""):
+    if not GROQ_API_KEY:
+        return None, "⚠️ Chưa có GROQ_API_KEY"
+    try:
+        res = requests.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": GROQ_MODEL,
+                "messages": [
+                    {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt rõ ràng, dễ hiểu."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 1024
+            },
+            timeout=30
+        )
+        if res.status_code == 200:
+            return f"✅ [Llama 3.1]\n" + res.json()["choices"][0]["message"]["content"], None
+        return None, f"Groq: Lỗi {res.status_code}"
+    except Exception as e:
+        return None, f"Groq: {str(e)}"
+
+# ==================================================
+# TỰ ĐỘNG CHUYỂN — Gemini trước → Groq sau
+# ==================================================
+def goi_ai(prompt, he_thong=""):
+    kq, loi = goi_gemini(prompt, he_thong)
+    if kq:
+        return kq
+    kq, loi2 = goi_groq(prompt, he_thong)
+    if kq:
+        return kq
+    return f"❌ Cả hai đều không trả lời:\n× {loi}\n× {loi2}"
 
 # ==================================================
 # TẠO FILE WORD & EXCEL
@@ -79,9 +106,8 @@ def tao_word(noi_dung):
         doc.save(path)
         return ten
     except Exception as e:
-        print(f"Lỗi tạo Word: {e}")
+        print(f"Lỗi Word: {e}")
         return ""
-
 
 def tao_excel(noi_dung):
     try:
@@ -97,7 +123,7 @@ def tao_excel(noi_dung):
         wb.save(path)
         return ten
     except Exception as e:
-        print(f"Lỗi tạo Excel: {e}")
+        print(f"Lỗi Excel: {e}")
         return ""
 
 # ==================================================
@@ -120,13 +146,10 @@ def chat():
     }
 
     he_thong = cau_hinh.get(loai, cau_hinh["chung"])
-    tra_loi, loi = goi_router(msg, he_thong)
-    
-    if not tra_loi:
-        return jsonify({"reply": loi})
+    tra_loi = goi_ai(msg, he_thong)
 
-    word = tao_word(tra_loi)
-    excel = tao_excel(tra_loi)
+    word = tao_word(tra_loi) if "✅" in tra_loi else ""
+    excel = tao_excel(tra_loi) if "✅" in tra_loi else ""
 
     return jsonify({
         "reply": tra_loi,
@@ -134,14 +157,12 @@ def chat():
         "excel": f"/download/{excel}" if excel else ""
     })
 
-
 @app.route("/download/<ten_file>")
 def download(ten_file):
     path = os.path.join(RESULT_FOLDER, ten_file)
     if os.path.exists(path):
         return send_file(path, as_attachment=True)
     return "Không tìm thấy tệp", 404
-
 
 @app.route("/")
 def trang_chu():
@@ -174,7 +195,6 @@ h1{text-align:center;color:#1e40af;margin-bottom:5px;font-size:22px}
 .msg.user .bubble{background:linear-gradient(135deg,#dbeafe,#e0e7ff);border-bottom-right-radius:6px;color:#1e3a8a}
 .msg.ai .bubble{background:#f1f5f9;border-bottom-left-radius:6px;color:#1e293b}
 .bubble.err{background:#fef2f2;border-left:3px solid #ef4444;color:#b91c1c}
-.bubble.warn{background:#fffbeb;border-left:3px solid #f59e0b;color:#92400e}
 .input-row{display:flex;gap:12px;align-items:flex-end}
 textarea{flex:1;padding:14px 20px;border:1px solid #e2e8f0;border-radius:24px;font-size:15px;resize:none;height:52px;outline:none;line-height:1.4}
 textarea:focus{border-color:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.1)}
@@ -191,7 +211,7 @@ textarea:focus{border-color:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.1)}
 <body>
 <div class="container">
 <h1>⚡ All Thủy Điện — Hỗ trợ công việc</h1>
-<p class="desc">Router AI · Gemini+Dola+Llama · Xuất Word/Excel</p>
+<p class="desc">Gemini 2.5 + Llama 3.1 · Xuất Word/Excel</p>
 
 <div class="tabs">
 <button class="tab active" data-loai="chung">💬 Trò chuyện chung</button>
@@ -209,7 +229,7 @@ textarea:focus{border-color:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.1)}
 </div>
 
 <div class="chat" id="chatKhu">
-<div class="msg ai"><div class="bubble">👋 Xin chào! Tôi dùng Router AI — tự động chuyển đổi giữa Gemini, Dola, Llama khi cần. Nhập yêu cầu nhé!</div></div>
+<div class="msg ai"><div class="bubble">👋 Xin chào! Dùng Gemini + Llama. Nhập yêu cầu nhé!</div></div>
 </div>
 
 <div class="input-row">
@@ -221,7 +241,6 @@ textarea:focus{border-color:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.1)}
 
 <script>
 let loaiHienTai = "chung";
-
 document.querySelectorAll(".tab").forEach(tab => {
     tab.onclick = () => {
         document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
@@ -229,7 +248,6 @@ document.querySelectorAll(".tab").forEach(tab => {
         loaiHienTai = tab.dataset.loai;
     };
 });
-
 function xuLyEnter(e){ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); guiCau(); } }
 function goiNhanh(nd){ document.getElementById("inputCau").value = nd; guiCau(); }
 
@@ -237,10 +255,8 @@ async function guiCau(){
     const input = document.getElementById("inputCau");
     const noiDung = input.value.trim();
     if(!noiDung) return;
-
     themTinNhan("user", noiDung);
     input.value = "";
-
     const nut = document.getElementById("nutGui");
     nut.disabled = true; nut.textContent = "⏳";
 
@@ -249,10 +265,8 @@ async function guiCau(){
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({message: noiDung, loai: loaiHienTai})
     });
-
     const duLieu = await phanHoi.json();
     themTinNhan("ai", duLieu.reply, duLieu.word, duLieu.excel);
-
     nut.disabled = false; nut.textContent = "➤";
 }
 
@@ -260,11 +274,7 @@ function themTinNhan(loai, noiDung, linkWord, linkExcel){
     const khu = document.getElementById("chatKhu");
     const div = document.createElement("div");
     div.className = "msg " + loai;
-
-    let classBubble = "";
-    if(noiDung.includes("❌")) classBubble = " err";
-    else if(noiDung.includes("⚠️")) classBubble = " warn";
-
+    let classBubble = noiDung.includes("❌") ? " err" : "";
     let linkTai = "";
     if(linkWord || linkExcel){
         linkTai = '<div class="dl">';
@@ -272,7 +282,6 @@ function themTinNhan(loai, noiDung, linkWord, linkExcel){
         if(linkExcel) linkTai += '<a href="'+linkExcel+'" class="dl-excel" target="_blank">📊 Tải Excel</a>';
         linkTai += "</div>";
     }
-
     const anToan = noiDung.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     div.innerHTML = '<div class="bubble'+classBubble+'">'+anToan+"</div>"+linkTai;
     khu.appendChild(div);
