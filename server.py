@@ -12,10 +12,10 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 CORS(app)
 
-# Đọc khóa từ biến môi trường
+# Đọc khóa từ biến môi trường Render
 OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY", "").strip()
 
-# Các mô hình theo yêu cầu
+# Các mô hình
 MODEL_CLAUDE = "anthropic/claude-3.5-sonnet"
 MODEL_GEMINI = "google/gemini-2.0-flash-exp"
 MODEL_DOLA  = "bytedance/dola-seed-2-0-pro"
@@ -34,9 +34,9 @@ MAC_DINH = "Trả lời bằng tiếng Việt rõ ràng, tự nhiên, dễ hiể
 # ==================================================
 def goi_ai_openrouter(ten_ai, model_id, prompt, he_thong=""):
     if not OPENROUTER_KEY:
-        return ten_ai, None, "❌ Chưa đặt biến môi trường OPENROUTER_KEY"
+        return ten_ai, None, "❌ Chưa đặt biến OPENROUTER_KEY trên Render"
     if not OPENROUTER_KEY.startswith("sk-or-v1-"):
-        return ten_ai, None, "❌ Khóa OpenRouter không hợp lệ"
+        return ten_ai, None, "❌ Khóa OpenRouter sai định dạng"
     
     url = "https://openrouter.ai/api/v1/chat/completions"
     try:
@@ -67,10 +67,10 @@ def goi_ai_openrouter(ten_ai, model_id, prompt, he_thong=""):
         elif res.status_code == 401:
             return ten_ai, None, "❌ Khóa OpenRouter sai/hết hạn"
         else:
-            return ten_ai, None, f"Lỗi {res.status_code}: {res.text[:100]}"
+            return ten_ai, None, f"Lỗi {res.status_code}"
             
     except Exception as e:
-        return ten_ai, None, f"Lỗi kết nối: {str(e)[:80]}"
+        return ten_ai, None, f"Lỗi kết nối: {str(e)[:60]}"
 
 # ==================================================
 # PHÂN BỐ AI THEO CHỨC NĂNG
@@ -94,7 +94,7 @@ def goi_phan_tich(prompt, he_thong=""):
     return goi_ai_openrouter("🔵 Gemini", MODEL_GEMINI, prompt, he_thong)
 
 # ==================================================
-# CẤU HÌNH CHUYÊN MỤC
+# CẤU HÌNH
 # ==================================================
 CHATS = {
     "doc": ("Chuyên gia soạn thảo văn bản chuẩn Việt Nam. Viết trang trọng, đúng thể thức.", goi_soan_thao),
@@ -104,7 +104,7 @@ CHATS = {
 }
 
 # ==================================================
-# XUẤT WORD & EXCEL
+# XUẤT FILE
 # ==================================================
 def _sach(dong): return re.sub(r"[*#`]+", "", dong).strip()
 
@@ -222,7 +222,7 @@ def download(ten): return send_from_directory(RESULT_FOLDER, os.path.basename(te
 def index(): return TRANG_CHU
 
 # ==================================================
-# GIAO DIỆN ĐẦY ĐỦ — ĐÚNG 5 Ô, NÚT GỬI HOẠT ĐỘNG
+# GIAO DIỆN — ĐÃ SỬA NÚT GỬI HOẠT ĐỘNG
 # ==================================================
 TRANG_CHU = r'''<!DOCTYPE html>
 <html lang="vi">
@@ -231,52 +231,52 @@ TRANG_CHU = r'''<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>All Thủy Điện — Hệ thống hỗ trợ</title>
 <style>
-:root{--g100:#f1f5f9;--g200:#e2e8f0;--c1:#6366f1;--c2:#2563eb;--c3:#16a34a;--c4:#9333ea;--c5:#f59e0b;--c6:#ec4899}
+:root{--g100:#f1f5f9;--g200:#e2e8f0;--c-doc:#2563eb;--c-tender:#16a34a;--c-equip:#9333ea;--c-data:#f59e0b;--c-info:#ec4899}
 *{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,-apple-system,sans-serif}
 body{background:linear-gradient(135deg,#f0f7ff,#faf5ff);min-height:100vh;padding:20px}
-.header{text-align:center;margin-bottom:28px}
-.header h1{font-size:26px;color:#1e293b;margin-bottom:6px}
-.header p{color:#475569;font-size:14px}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;max-width:2200px;margin:0 auto}
-@media(max-width:1400px){.grid{grid-template-columns:repeat(2,1fr)}}
+.header{text-align:center;margin-bottom:24px}
+.header h1{font-size:24px;color:#1e293b;margin-bottom:4px}
+.header p{color:#64748b;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:2000px;margin:0 auto}
+@media(max-width:1200px){.grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:768px){.grid{grid-template-columns:1fr}}
-.card{background:#fff;border-radius:20px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,.06);display:flex;flex-direction:column;height:680px;border-top:4px solid var(--c)}
-.c-doc{--c:var(--c2);--cl:#dbeafe}
-.c-tender{--c:var(--c3);--cl:#dcfce7}
-.c-equip{--c:var(--c4);--cl:#f3e8ff}
-.c-data{--c:var(--c5);--cl:#fef3c7}
-.c-info{--c:var(--c6);--cl:#fce7f3}
-.card-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid var(--cl)}
-.card-icon{font-size:22px}.card-title{font-size:16px;font-weight:700;color:var(--c)}
-.card-ai{font-size:11px;color:#94a3b8;margin-left:auto;background:var(--g100);padding:3px 8px;border-radius:12px;white-space:nowrap}
-.upload-zone{border:2px dashed var(--g200);border-radius:12px;padding:12px;text-align:center;cursor:pointer;margin-bottom:12px;transition:.2s}
+.card{background:#fff;border-radius:16px;padding:20px;box-shadow:0 4px 16px rgba(0,0,0,.05);display:flex;flex-direction:column;height:660px;border-top:4px solid var(--c)}
+.c-doc{--c:var(--c-doc);--cl:#dbeafe}
+.c-tender{--c:var(--c-tender);--cl:#dcfce7}
+.c-equip{--c:var(--c-equip);--cl:#f3e8ff}
+.c-data{--c:var(--c-data);--cl:#fef3c7}
+.c-info{--c:var(--c-info);--cl:#fce7f3}
+.card-head{display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid var(--cl)}
+.card-icon{font-size:20px}.card-title{font-size:15px;font-weight:700;color:var(--c)}
+.card-ai{font-size:10px;color:#94a3b8;margin-left:auto;background:var(--cl);padding:2px 8px;border-radius:10px;white-space:nowrap}
+.upload-zone{border:2px dashed #cbd5e1;border-radius:12px;padding:10px;text-align:center;cursor:pointer;margin-bottom:10px;transition:.2s}
 .upload-zone:hover,.upload-zone.drag{border-color:var(--c);background:var(--cl)}
-.file-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;margin-bottom:12px;font-size:13px;background:var(--cl)}
-.file-bar button{margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:#dc2626}
-.sheet-bar{display:flex;gap:8px;margin-bottom:12px}
-.sheet-bar input{flex:1;padding:10px 14px;border:1px solid var(--g200);border-radius:8px;font-size:13px}
-.sheet-bar button{padding:10px 16px;border:none;border-radius:8px;background:var(--c);color:#fff;cursor:pointer;font-weight:600;font-size:13px}
-.quick-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
-.q-btn{padding:10px 12px;border:1px solid var(--g200);border-radius:8px;background:#fff;cursor:pointer;font-size:12px;text-align:left;transition:.2s}
+.file-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;margin-bottom:10px;font-size:12px;background:var(--cl)}
+.file-bar button{margin-left:auto;background:none;border:none;font-size:16px;cursor:pointer;color:#dc2626}
+.sheet-bar{display:flex;gap:8px;margin-bottom:10px}
+.sheet-bar input{flex:1;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px}
+.sheet-bar button{padding:10px 14px;border:none;border-radius:8px;background:var(--c);color:#fff;cursor:pointer;font-weight:600;font-size:13px}
+.quick-btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px}
+.q-btn{padding:9px 10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:11.5px;text-align:left;transition:.2s}
 .q-btn:hover{border-color:var(--c);background:var(--cl)}
-.chat-area{flex:1;overflow-y:auto;padding:4px;margin-bottom:12px;min-height:220px}
-.msg{margin-bottom:14px;max-width:98%}.msg.user{margin-left:auto}
-.bubble{padding:12px 16px;border-radius:18px;line-height:1.6;font-size:14px;white-space:pre-wrap}
-.msg.user .bubble{background:linear-gradient(135deg,#dbeafe,#e0e7ff);border-bottom-right-radius:8px}
-.msg.ai .bubble{background:var(--g100);border-bottom-left-radius:8px}
-.bubble.err{background:#fee2e2;border-left:3px solid #ef4444}
-.dl-group{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
-.dl-btn{padding:8px 16px;border-radius:20px;text-decoration:none;font-size:13px;font-weight:600;display:inline-block}
+.chat-area{flex:1;overflow-y:auto;padding:4px;margin-bottom:10px;min-height:200px}
+.msg{margin-bottom:12px;max-width:98%}.msg.user{margin-left:auto}
+.bubble{padding:12px 14px;border-radius:16px;line-height:1.55;font-size:13.5px;white-space:pre-wrap}
+.msg.user .bubble{background:linear-gradient(135deg,#dbeafe,#e0e7ff);border-bottom-right-radius:6px}
+.msg.ai .bubble{background:#f8fafc;border-bottom-left-radius:6px}
+.bubble.err{background:#fef2f2;border-left:3px solid #ef4444}
+.dl-group{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.dl-btn{padding:7px 14px;border-radius:16px;text-decoration:none;font-size:12px;font-weight:600;display:inline-block}
 .dl-word{background:#dbeafe;color:#1d4ed8}.dl-excel{background:#dcfce7;color:#15803d}
-.input-row{display:flex;gap:10px;align-items:flex-end;margin-top:auto}
-textarea{flex:1;min-height:46px;max-height:120px;padding:12px 18px;border:1px solid var(--g200);border-radius:24px;font-size:14px;resize:none;outline:none;transition:.2s}
+.input-row{display:flex;gap:8px;align-items:flex-end;margin-top:auto}
+textarea{flex:1;min-height:44px;max-height:100px;padding:11px 16px;border:1px solid #e2e8f0;border-radius:22px;font-size:14px;resize:none;outline:none;transition:.2s}
 textarea:focus{border-color:var(--c);box-shadow:0 0 0 3px var(--cl)}
-.send-btn{width:44px;height:44px;border-radius:50%;border:none;color:#fff;background:var(--c);cursor:pointer;font-size:18px;transition:.2s;flex-shrink:0}
-.send-btn:hover{opacity:.9;transform:scale(1.05)}
-.send-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.send-btn{width:42px;height:42px;border-radius:50%;border:none;color:#fff;background:var(--c);cursor:pointer;font-size:17px;transition:.2s;flex-shrink:0}
+.send-btn:hover{opacity:.9}
+.send-btn:disabled{opacity:.5;cursor:not-allowed}
 .hidden{display:none!important}
-.contact-row{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--g100);font-size:14px}
-.contact-label{font-weight:600;color:var(--c);min-width:90px}
+.contact-row{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid #f1f5f9;font-size:13.5px}
+.contact-label{font-weight:600;color:var(--c);min-width:85px}
 a{color:var(--c);text-decoration:none}
 </style>
 </head>
@@ -285,7 +285,7 @@ a{color:var(--c);text-decoration:none}
 <h1>⚡ All Thủy Điện — Hệ thống hỗ trợ</h1>
 <p>Soạn thảo · Đấu thầu · Quản lý thiết bị · Phân tích dữ liệu — Dùng chung khóa với Facebook ✅</p>
 </div>
-<div class="grid" id="grid">
+<div class="grid">
 <!-- CỘT 1: Soạn thảo văn bản -->
 <div class="card c-doc">
 <div class="card-head"><span class="card-icon">✍️</span><h3 class="card-title">Soạn thảo văn bản</h3><span class="card-ai">Claude → Llama</span></div>
@@ -364,9 +364,9 @@ a{color:var(--c);text-decoration:none}
 <div class="contact-row"><span>📍</span><span class="contact-label">Địa chỉ:</span><span>TK5 - Mường La - Sơn La</span></div>
 <div class="contact-row"><span>🌐</span><span class="contact-label">Web:</span><a href="https://namchien.vn" target="_blank">namchien.vn</a></div>
 </div>
-<div style="margin-top:auto;padding-top:16px;text-align:center;font-size:12px;color:#9ca3af">
+<div style="margin-top:auto;padding-top:14px;text-align:center;font-size:11.5px;color:#9ca3af">
 <p>© 2026 — Hệ thống hỗ trợ công việc nội bộ</p>
-<p style="margin-top:6px">🔑 Chạy chung khóa với Facebook ✅</p>
+<p style="margin-top:4px">🔑 Chạy chung khóa với Facebook ✅</p>
 </div>
 </div>
 </div>
@@ -430,17 +430,17 @@ async function upload(kind, f){
   }catch(e){ alert("Không tải được tệp"); }
 }
 
-// Soạn thảo
+// === SOẠN THẢO ===
 $("in-doc").addEventListener("keydown", e => { if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send("doc"); } });
 $("sd-doc").onclick = () => send("doc");
 document.querySelectorAll("#ch-doc").forEach(c => c.parentElement.querySelectorAll(".q-btn").forEach(b => b.onclick = () => send("doc", b.dataset.preset)));
 
-// Đấu thầu
+// === ĐẤU THẦU ===
 $("in-tender").addEventListener("keydown", e => { if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send("tender"); } });
 $("sd-tender").onclick = () => send("tender");
 document.querySelectorAll("#ch-tender").forEach(c => c.parentElement.querySelectorAll(".q-btn").forEach(b => b.onclick = () => send("tender", b.dataset.preset)));
 
-// Thiết bị
+// === THIẾT BỊ ===
 $("in-equip").addEventListener("keydown", e => { if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send("equip"); } });
 $("sd-equip").onclick = () => send("equip");
 $("up-equip").onclick = () => $("fi-equip").click();
@@ -451,7 +451,7 @@ $("up-equip").ondrop = e => { e.preventDefault(); $("up-equip").classList.remove
 $("fb-equip").querySelector("button").onclick = () => { ST.equip.file=""; $("fi-equip").value=""; $("fb-equip").classList.add("hidden"); };
 document.querySelectorAll("#ch-equip").forEach(c => c.parentElement.querySelectorAll(".q-btn").forEach(b => b.onclick = () => send("equip", b.dataset.preset)));
 
-// Dữ liệu
+// === DỮ LIỆU ===
 $("in-data").addEventListener("keydown", e => { if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send("data"); } });
 $("sd-data").onclick = () => send("data");
 $("up-data").onclick = () => $("fi-data").click();
