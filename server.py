@@ -771,4 +771,4 @@ async function sendEquip(){
     const m = i.value.trim(); if(!m && !file4Content) return;
     addMsg("chat4","user",m||"Phân tích thiết bị"); i.value="";
     document.getElementById("btn4").disabled=true; document.getElementById("btn4").textContent="⏳";
-    const r = await fetch("/api/chat-equip",
+    const r = await fetch("/api/chat-equip", {method:"
