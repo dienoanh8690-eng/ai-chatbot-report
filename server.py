@@ -12,7 +12,7 @@ app = Flask(__name__)
 CORS(app)
 
 # ==================================================
-# CẤU HÌNH API KEY — Đặt ở biến môi trường Render
+# CẤU HÌNH API KEY — Đặt ở biến môi trường trên Render
 # ==================================================
 AI_API_KEY = os.environ.get("AI_API_KEY", "").strip()
 AI_URL = "https://api.aimlapi.com/v1/chat/completions"
@@ -55,9 +55,9 @@ def goi_aiml(prompt, he_thong=""):
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": 0.7,
-                "max_tokens": 3000
+                "max_tokens": 1024
             },
-            timeout=90
+            timeout=30
         )
         if res.status_code == 200:
             return "DOLA/AIML", res.json()["choices"][0]["message"]["content"], None
@@ -76,7 +76,7 @@ Yêu cầu: {prompt}"""
         res = requests.post(
             GEMINI_API_URL,
             json={"contents": [{"parts": [{"text": full_text}]}]},
-            timeout=90
+            timeout=30
         )
         if res.status_code == 200:
             data = res.json()
@@ -101,9 +101,9 @@ def goi_groq(prompt, he_thong=""):
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": 0.7,
-                "max_tokens": 3000
+                "max_tokens": 1024
             },
-            timeout=90
+            timeout=30
         )
         if res.status_code == 200:
             return "Llama/Groq", res.json()["choices"][0]["message"]["content"], None
@@ -125,9 +125,10 @@ def goi_gpt(prompt, he_thong=""):
                     {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt."},
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": 0.7
+                "temperature": 0.7,
+                "max_tokens": 1024
             },
-            timeout=90
+            timeout=30
         )
         if res.status_code == 200:
             return "GPT", res.json()["choices"][0]["message"]["content"], None
@@ -149,11 +150,11 @@ def goi_claude(prompt, he_thong=""):
             },
             json={
                 "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 3000,
+                "max_tokens": 1024,
                 "system": he_thong or "Trả lời bằng tiếng Việt.",
                 "messages": [{"role": "user", "content": prompt}]
             },
-            timeout=90
+            timeout=30
         )
         if res.status_code == 200:
             return "Claude", res.json()["content"][0]["text"], None
@@ -225,7 +226,7 @@ def doc_google_sheet(sheet_url):
             return None, "❌ Link không đúng định dạng Google Sheets"
         sheet_id = sheet_url.split("/d/")[1].split("/")[0]
         csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
-        res = requests.get(csv_url, timeout=30)
+        res = requests.get(csv_url, timeout=15)
         if res.status_code == 200:
             return res.text, None
         return None, "❌ Không đọc được Sheet → Kiểm tra quyền chia sẻ: Bất kỳ ai có link"
@@ -280,7 +281,7 @@ def chat_general():
     if not msg:
         return jsonify({"reply": "Vui lòng nhập câu hỏi!"})
     he_thong = "Bạn là trợ lý AI tổng hợp, thông minh, hữu ích. Trả lời rõ ràng, dễ hiểu, bằng tiếng Việt."
-    danh_sach = [goi_aiml, goi_gemini, goi_gpt, goi_claude]
+    danh_sach = [goi_gemini, goi_aiml, goi_gpt, goi_claude]
     tra_loi = goi_theo_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
@@ -296,7 +297,7 @@ def chat_data():
         return jsonify({"reply": "Vui lòng nhập yêu cầu, tải tệp hoặc dán link Google Sheets!"})
     prompt = f"{msg}\n\nDữ liệu phân tích:\n{full_data}" if full_data else msg
     he_thong = "Bạn là chuyên gia phân tích dữ liệu và tạo báo cáo. Trả lời rõ ràng, tóm tắt số liệu quan trọng, dùng bảng khi phù hợp."
-    danh_sach = [goi_aiml, goi_gemini, goi_groq]
+    danh_sach = [goi_gemini, goi_aiml, goi_groq]
     tra_loi = goi_theo_danh_sach(prompt, danh_sach, he_thong)
     word = tao_word(tra_loi) if "✅" in tra_loi else ""
     excel = tao_excel(tra_loi) if "✅" in tra_loi else ""
@@ -314,7 +315,7 @@ def chat_doc():
     if not msg:
         return jsonify({"reply": "Vui lòng nhập yêu cầu soạn thảo!"})
     he_thong = "Bạn là chuyên gia soạn thảo văn bản hành chính, hợp đồng, thư từ. Viết chuẩn mực, đúng thể thức Việt Nam."
-    danh_sach = [goi_aiml, goi_gpt, goi_claude]
+    danh_sach = [goi_gpt, goi_claude, goi_aiml]
     tra_loi = goi_theo_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
@@ -326,7 +327,7 @@ def chat_tender():
     if not msg:
         return jsonify({"reply": "Vui lòng nhập yêu cầu về quy trình đấu thầu!"})
     he_thong = "Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, hồ sơ, lưu ý pháp lý."
-    danh_sach = [goi_aiml, goi_gemini, goi_groq]
+    danh_sach = [goi_gemini, goi_groq, goi_aiml]
     tra_loi = goi_theo_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
@@ -340,7 +341,7 @@ def chat_equip():
     if not msg and not file_content:
         return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải danh sách thiết bị!"})
     he_thong = "Bạn là chuyên gia quản lý thiết bị nhà máy. Phân loại, theo dõi tình trạng, đề xuất bảo trì, tính tuổi thọ."
-    danh_sach = [goi_aiml, goi_gemini, goi_groq]
+    danh_sach = [goi_gemini, goi_groq, goi_aiml]
     tra_loi = goi_theo_danh_sach(full_prompt, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
 
@@ -486,7 +487,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 <div class="card-head">
 <span class="card-icon">💬</span>
 <h3 class="card-title">Trò chuyện chung</h3>
-<span class="card-ai">DOLA/AIML → Gemini → GPT → Claude</span>
+<span class="card-ai">Gemini → DOLA → GPT → Claude</span>
 </div>
 <div class="quick-btns">
 <button class="q-btn" onclick="quickGen('Giải thích khái niệm về nhà máy thủy điện')">🔌 Thủy điện cơ bản</button>
@@ -507,7 +508,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 <div class="card-head">
 <span class="card-icon">📊</span>
 <h3 class="card-title">Xử lý dữ liệu & Tạo báo cáo</h3>
-<span class="card-ai">DOLA/AIML → Gemini → Llama</span>
+<span class="card-ai">Gemini → DOLA → Llama</span>
 </div>
 <div class="upload-zone" id="uploadZone1" onclick="document.getElementById('fileInput1').click()">
 <p>📎 Nhấn chọn hoặc kéo thả tệp (.xlsx, .txt)</p>
@@ -544,7 +545,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 <div class="card-head">
 <span class="card-icon">✍️</span>
 <h3 class="card-title">Soạn thảo văn bản</h3>
-<span class="card-ai">DOLA/AIML → GPT → Claude</span>
+<span class="card-ai">GPT → Claude → DOLA</span>
 </div>
 <div class="quick-btns">
 <button class="q-btn" onclick="quickDoc('Soạn thảo công văn gửi cấp trên')">📝 Công văn</button>
@@ -565,7 +566,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 <div class="card-head">
 <span class="card-icon">🏆</span>
 <h3 class="card-title">Quy trình đấu thầu</h3>
-<span class="card-ai">DOLA/AIML → Gemini → Llama</span>
+<span class="card-ai">Gemini → Llama → DOLA</span>
 </div>
 <div class="quick-btns">
 <button class="q-btn" onclick="quickTender('Giải thích toàn bộ quy trình đấu thầu')">📋 Toàn bộ quy trình</button>
@@ -586,7 +587,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 <div class="card-head">
 <span class="card-icon">🔧</span>
 <h3 class="card-title">Quản lý thiết bị</h3>
-<span class="card-ai">DOLA/AIML → Gemini → Llama</span>
+<span class="card-ai">Gemini → Llama → DOLA</span>
 </div>
 <div class="upload-zone" id="uploadZone4" onclick="document.getElementById('fileInput4').click()">
 <p>📎 Tải danh sách thiết bị (.xlsx, .txt)</p>
@@ -756,4 +757,17 @@ async function sendDoc(){
 function quickDoc(t){ document.getElementById('input2').value=t; sendDoc(); }
 
 async function sendTender(){
-    const i
+    const i = document.getElementById('input3');
+    const m = i.value.trim(); if(!m) return;
+    addMsg('chat3','user',m); i.value='';
+    document.getElementById('btn3').disabled=true; document.getElementById('btn3').textContent='⏳';
+    const r = await fetch('/api/chat-tender', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:m})});
+    const d = await r.json(); addMsg('chat3','ai',d.reply);
+    document.getElementById('btn3').disabled=false; document.getElementById('btn3').textContent='➤';
+}
+function quickTender(t){ document.getElementById('input3').value=t; sendTender(); }
+
+async function sendEquip(){
+    const i = document.getElementById('input4');
+    const m = i.value.trim(); if(!m && !file4Content) return;
+    addMsg('chat4','user',m||'Phân tích thiết bị
