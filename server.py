@@ -13,79 +13,54 @@ CORS(app)
 # ==================================================
 # CẤU HÌNH — Điền trên Render → Environment Variables
 # ==================================================
-# Gemini 3.5 — lấy tại: https://aistudio.google.com/app/apikey
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-3.5-pro-preview-09-2026"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-
-# OpenAI (ChatGPT) — lấy tại: https://platform.openai.com/api-keys
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
-OPENAI_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_MODEL = "gpt-3.5-turbo"
+# Router AI / AIML API — lấy khóa tại: https://aimlapi.com
+ROUTER_API_KEY = os.environ.get("AI_API_KEY", "").strip()
+ROUTER_URL = "https://api.aimlapi.com/v1/chat/completions"
+# Các model dự phòng — tự động chuyển nếu 1 cái bận
+MODEL_LIST = [
+    "google/gemini-2.5-flash",
+    "bytedance/dola-seed-2-0-pro",
+    "meta-llama/llama-3.2-1b-instruct",
+    "mistralai/mistral-7b-instruct-v0.3"
+]
 
 RESULT_FOLDER = "bao_cao_xuat_ra"
 os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 # ==================================================
-# HÀM GỌI AI
+# HÀM GỌI ROUTER AI — TỰ ĐỘNG CHUYỂN MODEL
 # ==================================================
-def goi_gemini(prompt, he_thong=""):
-    if not GEMINI_API_KEY:
-        return None, "⚠️ Chưa đặt GEMINI_API_KEY trên Render"
-    try:
-        full_text = f"{he_thong}\n\nYêu cầu: {prompt}" if he_thong else prompt
-        res = requests.post(
-            GEMINI_URL,
-            json={"contents": [{"parts": [{"text": full_text}]}]},
-            timeout=30
-        )
-        if res.status_code == 200:
-            data = res.json()
-            if "candidates" in data:
-                return data["candidates"][0]["content"]["parts"][0]["text"], None
-            return None, f"Gemini trả dữ liệu không đúng định dạng"
-        return None, f"Lỗi {res.status_code} — Kiểm tra lại khóa Gemini"
-    except Exception as e:
-        return None, f"Lỗi kết nối Gemini: {str(e)}"
-
-
-def goi_gpt(prompt, he_thong=""):
-    if not OPENAI_API_KEY:
-        return None, "⚠️ Chưa đặt OPENAI_API_KEY trên Render"
-    try:
-        res = requests.post(
-            OPENAI_URL,
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": OPENAI_MODEL,
-                "messages": [
-                    {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt rõ ràng, dễ hiểu."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 1024
-            },
-            timeout=30
-        )
-        if res.status_code == 200:
-            return res.json()["choices"][0]["message"]["content"], None
-        return None, f"Lỗi {res.status_code} — Kiểm tra lại khóa OpenAI"
-    except Exception as e:
-        return None, f"Lỗi kết nối GPT: {str(e)}"
-
-
-def goi_ai_tu_dong(prompt, he_thong=""):
-    """Thử Gemini 3.5 trước → lỗi thì tự động dùng GPT"""
-    kq, loi = goi_gemini(prompt, he_thong)
-    if kq:
-        return f"✅ [Gemini 3.5]\n{kq}"
-    kq, loi_gpt = goi_gpt(prompt, he_thong)
-    if kq:
-        return f"✅ [GPT]\n{kq}"
-    return f"❌ Cả hai AI đều không trả lời:\n× Gemini: {loi}\n× GPT: {loi_gpt}"
+def goi_router(prompt, he_thong=""):
+    if not ROUTER_API_KEY:
+        return None, "⚠️ Chưa đặt AI_API_KEY trên Render"
+    
+    loi = []
+    for model in MODEL_LIST:
+        try:
+            res = requests.post(
+                ROUTER_URL,
+                headers={
+                    "Authorization": f"Bearer {ROUTER_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": he_thong or "Trả lời bằng tiếng Việt rõ ràng, dễ hiểu."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 1024
+                },
+                timeout=30
+            )
+            if res.status_code == 200:
+                return f"✅ [{model.split('/')[-1]}]\n" + res.json()["choices"][0]["message"]["content"], None
+            loi.append(f"{model}: Lỗi {res.status_code}")
+        except Exception as e:
+            loi.append(f"{model}: {str(e)}")
+    
+    return None, "❌ Tất cả đều không trả lời:\n" + "\n".join(loi)
 
 # ==================================================
 # TẠO FILE WORD & EXCEL
@@ -145,10 +120,13 @@ def chat():
     }
 
     he_thong = cau_hinh.get(loai, cau_hinh["chung"])
-    tra_loi = goi_ai_tu_dong(msg, he_thong)
+    tra_loi, loi = goi_router(msg, he_thong)
+    
+    if not tra_loi:
+        return jsonify({"reply": loi})
 
-    word = tao_word(tra_loi) if "✅" in tra_loi else ""
-    excel = tao_excel(tra_loi) if "✅" in tra_loi else ""
+    word = tao_word(tra_loi)
+    excel = tao_excel(tra_loi)
 
     return jsonify({
         "reply": tra_loi,
@@ -213,7 +191,7 @@ textarea:focus{border-color:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.1)}
 <body>
 <div class="container">
 <h1>⚡ All Thủy Điện — Hỗ trợ công việc</h1>
-<p class="desc">Gemini 3.5 + GPT · Soạn thảo · Báo cáo · Đấu thầu · Xuất Word/Excel</p>
+<p class="desc">Router AI · Gemini+Dola+Llama · Xuất Word/Excel</p>
 
 <div class="tabs">
 <button class="tab active" data-loai="chung">💬 Trò chuyện chung</button>
@@ -231,7 +209,7 @@ textarea:focus{border-color:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.1)}
 </div>
 
 <div class="chat" id="chatKhu">
-<div class="msg ai"><div class="bubble">👋 Xin chào! Tôi hỗ trợ bằng Gemini 3.5 và GPT. Chọn chức năng hoặc nhập yêu cầu nhé!</div></div>
+<div class="msg ai"><div class="bubble">👋 Xin chào! Tôi dùng Router AI — tự động chuyển đổi giữa Gemini, Dola, Llama khi cần. Nhập yêu cầu nhé!</div></div>
 </div>
 
 <div class="input-row">
