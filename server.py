@@ -190,7 +190,8 @@ def tao_word(noi_dung):
                     run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
         doc.save(duong_dan)
         return ten
-    except:
+    except Exception as e:
+        print(f"Lỗi tạo Word: {e}")
         return ""
 
 
@@ -209,7 +210,8 @@ def tao_excel(noi_dung=""):
                 hang += 1
         wb.save(duong_dan)
         return ten
-    except:
+    except Exception as e:
+        print(f"Lỗi tạo Excel: {e}")
         return ""
 
 
@@ -267,7 +269,7 @@ def connect_sheet():
     return jsonify({"status": "ok", "content": noi_dung[:5000]})
 
 
-# ===== 🔵 MỚI: TRÒ CHUYỆN CHUNG =====
+# ===== 🔵 TRÒ CHUYỆN CHUNG =====
 @app.route("/api/chat-general", methods=["POST"])
 def chat_general():
     """💬 Trò chuyện chung — DOLA/AIML → Gemini → GPT → Claude"""
@@ -379,6 +381,7 @@ def trang_chu():
 --p2: #16a34a; --p2-light: #dcfce7; --p2-bg: #f0fdf4;
 --p3: #9333ea; --p3-light: #f3e8ff; --p3-bg: #faf5ff;
 --p4: #f59e0b; --p4-light: #fef3c7; --p4-bg: #fffbeb;
+--p5: #ec4899; --p5-light: #fce7f3; --p5-bg: #fdf2f8;
 --gray-100: #f1f5f9; --gray-200: #e2e8f0; --gray-600: #475569; --gray-800: #1e293b;
 --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
 --shadow-md: 0 4px 12px rgba(0,0,0,0.06);
@@ -390,23 +393,24 @@ body { background: linear-gradient(135deg, #f0f7ff 0%, #faf5ff 100%); min-height
 .header { text-align: center; margin-bottom: 28px; padding-top: 10px; }
 .header h1 { font-size: 26px; font-weight: 700; color: var(--gray-800); margin-bottom: 6px; }
 .header p { color: var(--gray-600); font-size: 14px; }
-.grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 22px; max-width: 2200px; margin: 0 auto; }
-@media (max-width: 1600px) { .grid { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 1000px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
-.card { background: white; border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-md); display: flex; flex-direction: column; height: calc(100vh - 160px); min-height: 650px; transition: transform 0.2s, box-shadow 0.2s; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; max-width: 2200px; margin: 0 auto; }
+@media (max-width: 1400px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+.card { background: white; border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-md); display: flex; flex-direction: column; height: 720px; min-height: 650px; transition: transform 0.2s, box-shadow 0.2s; }
 .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
 .card-gen { border-top: 4px solid var(--gen); }
 .card-p1 { border-top: 4px solid var(--p1); }
 .card-p2 { border-top: 4px solid var(--p2); }
 .card-p3 { border-top: 4px solid var(--p3); }
 .card-p4 { border-top: 4px solid var(--p4); }
-.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 2px solid; }
+.card-p5 { border-top: 4px solid var(--p5); }
+.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 2px solid; flex-wrap: wrap; }
 .card-gen .card-head { border-bottom-color: var(--gen-light); }
 .card-p1 .card-head { border-bottom-color: var(--p1-light); }
 .card-p2 .card-head { border-bottom-color: var(--p2-light); }
 .card-p3 .card-head { border-bottom-color: var(--p3-light); }
 .card-p4 .card-head { border-bottom-color: var(--p4-light); }
+.card-p5 .card-head { border-bottom-color: var(--p5-light); }
 .card-icon { font-size: 24px; }
 .card-title { font-size: 17px; font-weight: 700; }
 .card-gen .card-title { color: var(--gen); }
@@ -414,6 +418,7 @@ body { background: linear-gradient(135deg, #f0f7ff 0%, #faf5ff 100%); min-height
 .card-p2 .card-title { color: var(--p2); }
 .card-p3 .card-title { color: var(--p3); }
 .card-p4 .card-title { color: var(--p4); }
+.card-p5 .card-title { color: var(--p5); }
 .card-ai { font-size: 11px; color: #94a3b8; margin-left: auto; background: var(--gray-100); padding: 3px 8px; border-radius: 12px; }
 .upload-zone { border: 2px dashed var(--gray-200); border-radius: var(--radius-md); padding: 14px; text-align: center; cursor: pointer; margin-bottom: 12px; transition: all 0.25s; }
 .upload-zone:hover { border-color: var(--gen); background: var(--gen-bg); }
@@ -436,7 +441,7 @@ body { background: linear-gradient(135deg, #f0f7ff 0%, #faf5ff 100%); min-height
 .card-p2 .q-btn:hover { border-color: var(--p2); background: var(--p2-bg); transform: translateY(-1px); }
 .card-p3 .q-btn:hover { border-color: var(--p3); background: var(--p3-bg); transform: translateY(-1px); }
 .card-p4 .q-btn:hover { border-color: var(--p4); background: var(--p4-bg); transform: translateY(-1px); }
-.chat-area { flex: 1; overflow-y: auto; padding: 4px; margin-bottom: 14px; }
+.chat-area { flex: 1; overflow-y: auto; padding: 4px; margin-bottom: 14px; min-height: 200px; }
 .msg { margin-bottom: 16px; max-width: 98%; animation: fadeIn 0.3s forwards; opacity: 0; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .msg.user { margin-left: auto; }
@@ -465,18 +470,28 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 .card-p2 .send-btn { background: var(--p2); }
 .card-p3 .send-btn { background: var(--p3); }
 .card-p4 .send-btn { background: var(--p4); }
+.card-p5 .send-btn { background: var(--p5); }
 .send-btn:hover:not(:disabled) { transform: scale(1.1); }
 .hidden { display: none !important; }
+/* ===== Ô THÔNG TIN LIÊN HỆ ===== */
+.contact-content { padding: 10px 0; line-height: 2; font-size: 14px; color: var(--gray-700); }
+.contact-row { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--gray-100); }
+.contact-row:last-child { border-bottom: none; }
+.contact-label { font-weight: 600; color: var(--p5); min-width: 90px; flex-shrink: 0; }
+.contact-value { color: var(--gray-800); }
+.contact-value a { color: var(--p5); text-decoration: none; }
+.contact-value a:hover { text-decoration: underline; }
+.contact-icon { font-size: 18px; min-width: 24px; text-align: center; }
 </style>
 </head>
 <body>
 <div class="header">
 <h1>⚡ All Thủy Điện — Hệ thống hỗ trợ toàn diện</h1>
-<p>Trò chuyện chung · Phân tích dữ liệu · Soạn thảo văn bản · Tư vấn đấu thầu · Quản lý thiết bị</p>
+<p>Trò chuyện chung · Phân tích dữ liệu · Soạn thảo văn bản · Tư vấn đấu thầu · Quản lý thiết bị · Thông tin liên hệ</p>
 </div>
 <div class="grid">
 
-<!-- 🔵 MỚI: TRÒ CHUYỆN CHUNG -->
+<!-- 🔵 TRÒ CHUYỆN CHUNG -->
 <div class="card card-gen">
 <div class="card-head">
 <span class="card-icon">💬</span>
@@ -628,6 +643,57 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 </div>
 
+<!-- 📌 THÔNG TIN LIÊN HỆ -->
+<div class="card card-p5">
+<div class="card-head">
+<span class="card-icon">📌</span>
+<h3 class="card-title">Thông tin liên hệ</h3>
+</div>
+
+<div class="contact-content">
+<div class="contact-row">
+<span class="contact-icon">👤</span>
+<span class="contact-label">Admin:</span>
+<span class="contact-value">Chotvjp</span>
+</div>
+<div class="contact-row">
+<span class="contact-icon">📞</span>
+<span class="contact-label">Điện thoại:</span>
+<span class="contact-value"><a href="tel:0973020486">0973020486</a></span>
+</div>
+<div class="contact-row">
+<span class="contact-icon">✉️</span>
+<span class="contact-label">Email:</span>
+<span class="contact-value"><a href="mailto:hoangdien86ncc@gmail.com">hoangdien86ncc@gmail.com</a></span>
+</div>
+<div class="contact-row">
+<span class="contact-icon">🏢</span>
+<span class="contact-label">Bộ phận:</span>
+<span class="contact-value">Quản lý kỹ thuật</span>
+</div>
+<div class="contact-row">
+<span class="contact-icon">🏭</span>
+<span class="contact-label">Đơn vị:</span>
+<span class="contact-value">Công ty cổ phần thủy điện Nậm Chiến</span>
+</div>
+<div class="contact-row">
+<span class="contact-icon">📍</span>
+<span class="contact-label">Địa chỉ:</span>
+<span class="contact-value">TK5 - Mường La - Sơn La</span>
+</div>
+<div class="contact-row">
+<span class="contact-icon">🌐</span>
+<span class="contact-label">Website:</span>
+<span class="contact-value"><a href="https://namchien.vn" target="_blank">namchien.vn</a></span>
+</div>
+</div>
+
+<div style="margin-top: auto; padding-top: 16px; text-align: center; font-size: 12px; color: #9ca3af;">
+<p>Hệ thống hỗ trợ công việc nội bộ</p>
+<p>© 2026 Công ty Cổ phần Thủy điện Nậm Chiến</p>
+</div>
+</div>
+
 </div>
 
 <script>
@@ -721,36 +787,3 @@ async function sendDoc(){
     document.getElementById('btn2').disabled=true; document.getElementById('btn2').textContent='⏳';
     const r = await fetch('/api/chat-doc', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:m})});
     const d = await r.json(); addMsg('chat2','ai',d.reply);
-    document.getElementById('btn2').disabled=false; document.getElementById('btn2').textContent='➤';
-}
-function quickDoc(t){ document.getElementById('input2').value=t; sendDoc(); }
-
-async function sendTender(){
-    const i = document.getElementById('input3');
-    const m = i.value.trim(); if(!m) return;
-    addMsg('chat3','user',m); i.value='';
-    document.getElementById('btn3').disabled=true; document.getElementById('btn3').textContent='⏳';
-    const r = await fetch('/api/chat-tender', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:m})});
-    const d = await r.json(); addMsg('chat3','ai',d.reply);
-    document.getElementById('btn3').disabled=false; document.getElementById('btn3').textContent='➤';
-}
-function quickTender(t){ document.getElementById('input3').value=t; sendTender(); }
-
-async function sendEquip(){
-    const i = document.getElementById('input4');
-    const m = i.value.trim(); if(!m && !file4Content) return;
-    addMsg('chat4','user',m||'Phân tích danh sách thiết bị'); i.value='';
-    document.getElementById('btn4').disabled=true; document.getElementById('btn4').textContent='⏳';
-    const r = await fetch('/api/chat-equip', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:m, file_content:file4Content})});
-    const d = await r.json(); addMsg('chat4','ai',d.reply);
-    document.getElementById('btn4').disabled=false; document.getElementById('btn4').textContent='➤';
-}
-function quickEquip(t){ document.getElementById('input4').value=t; sendEquip(); }
-</script>
-</body>
-</html>
-"""
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
