@@ -13,7 +13,7 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 CORS(app)
 
 # ==================================================
-# KHÓA ĐƯỢC ĐIỀN SẴN TỪ ẢNH CỦA BẠN
+# 🔑 GIỮ NGUYÊN KHÓA CỦA BẠN — ĐÃ CHẠY ĐƯỢC HÔM TRƯỚC
 # ==================================================
 GEMINI_API_KEY = os.environ.get(
     "GEMINI_API_KEY",
@@ -25,70 +25,63 @@ GROQ_API_KEY = os.environ.get(
     "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"
 ).strip()
 
-GEMINI_MODEL = "gemini-2.0-flash"
-GROQ_MODEL = "llama-3.1-8b-instant"
+GEMINI_MODEL = "gemini-3.5-pro"  # ← Đúng phiên bản bạn đã dùng!
 TIMEOUT = 30
 
-UPLOAD_FOLDER = "tai_lieu_tai_len"
-RESULT_FOLDER = "ket_qua_xuat_ra"
+UPLOAD_FOLDER = "uploads"
+RESULT_FOLDER = "results"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 MAC_DINH = "Trả lời bằng tiếng Việt rõ ràng, tự nhiên, dễ hiểu, chính xác."
 
 # ==================================================
-# GỌI GEMINI — ĐÃ SỬA ENDPOINT CHO KHÓA AQ...
+# GỌI GEMINI — THEO KIỂU ĐÃ CHẠY ĐƯỢC HÔM TRƯỚC
 # ==================================================
 def goi_gemini(prompt, he_thong=""):
-    ten = "🔵 Gemini"
-    if not GEMINI_API_KEY or GEMINI_API_KEY.startswith("AQ") is False:
-        pass
-    # Dùng endpoint v1alpha tương thích khóa AQ...
-    url = f"https://generativelanguage.googleapis.com/v1alpha/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    try:
-        res = requests.post(
-            url,
-            headers={"Content-Type": "application/json"},
-            json={
-                "system_instruction": {"parts": [{"text": he_thong or MAC_DINH}]},
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generation_config": {"temperature": 0.7, "max_output_tokens": 2048},
-            },
-            timeout=TIMEOUT,
-        )
-        if res.status_code == 200:
-            data = res.json()
-            cands = data.get("candidates", [])
-            if cands:
-                parts = cands[0].get("content", {}).get("parts", [])
-                text = "".join(p.get("text", "") for p in parts).strip()
-                if text:
-                    return ten, text, None
-            return ten, None, "Phản hồi rỗng/bị chặn"
-        # Thử endpoint v1beta nếu v1alpha không được
-        if res.status_code in (404, 403):
-            url2 = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-            res2 = requests.post(url2, headers={"Content-Type": "application/json"}, json={
-                "system_instruction": {"parts": [{"text": he_thong or MAC_DINH}]},
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generation_config": {"temperature": 0.7, "max_output_tokens": 2048},
-            }, timeout=TIMEOUT)
-            if res2.status_code == 200:
-                data2 = res2.json()
-                cands2 = data2.get("candidates", [])
-                if cands2:
-                    parts2 = cands2[0].get("content", {}).get("parts", [])
-                    text2 = "".join(p.get("text", "") for p in parts2).strip()
-                    if text2:
-                        return ten, text2, None
-        return ten, None, f"Lỗi {res.status_code}"
-    except Exception as e:
-        return ten, None, f"Lỗi kết nối: {str(e)[:40]}"
+    ten = "🔵 Gemini 3.5"
+    
+    # Thử lần lượt các endpoint tương thích với khóa AQ...
+    endpoints = [
+        f"https://generativelanguage.googleapis.com/v1alpha/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+        f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+    ]
+    
+    for url in endpoints:
+        try:
+            res = requests.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json={
+                    "system_instruction": {"parts": [{"text": he_thong or MAC_DINH}]},
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generation_config": {"temperature": 0.7, "max_output_tokens": 2048},
+                },
+                timeout=TIMEOUT,
+            )
+            
+            if res.status_code == 200:
+                data = res.json()
+                cands = data.get("candidates", [])
+                if cands:
+                    parts = cands[0].get("content", {}).get("parts", [])
+                    text = "".join(p.get("text", "") for p in parts).strip()
+                    if text:
+                        return ten, text, None
+        except Exception as e:
+            continue
+    
+    return ten, None, "❌ Tất cả đường dẫn đều không tương thích — kiểm tra lại khóa hoặc phiên bản mô hình"
 
+# ==================================================
+# GỌI GROQ — Dự phòng
+# ==================================================
 def goi_groq(prompt, he_thong=""):
     ten = "🟢 Groq/Llama"
     if not GROQ_API_KEY or not GROQ_API_KEY.startswith("gsk_"):
-        return ten, None, "Chưa điền khóa"
+        return ten, None, "Chưa điền khóa Groq"
+    
     url = "https://api.groq.com/openai/v1/chat/completions"
     try:
         res = requests.post(
@@ -98,7 +91,7 @@ def goi_groq(prompt, he_thong=""):
                 "Content-Type": "application/json",
             },
             json={
-                "model": GROQ_MODEL,
+                "model": "llama-3.1-8b-instant",
                 "messages": [
                     {"role": "system", "content": he_thong or MAC_DINH},
                     {"role": "user", "content": prompt},
@@ -109,20 +102,22 @@ def goi_groq(prompt, he_thong=""):
             timeout=TIMEOUT,
         )
         if res.status_code == 200:
-            text = res.json()["choices"][0]["message"]["content"].strip()
-            return ten, text, None
-        return ten, None, f"Lỗi {res.status_code}"
+            return ten, res.json()["choices"][0]["message"]["content"].strip(), None
     except Exception as e:
-        return ten, None, f"Lỗi kết nối: {str(e)[:40]}"
+        pass
+    return ten, None, "Không kết nối được"
 
+# ==================================================
+# TỰ ĐỘNG CHUYỂN ĐỔI — Gemini trước, Groq sau
+# ==================================================
 def goi_tu_dong(prompt, danh_sach, he_thong=""):
     loi_tong = []
     for ham in danh_sach:
         ten, kq, loi = ham(prompt, he_thong)
         if kq:
             return {"ok": True, "reply": f"✅ [{ten}]\n{kq}", "plain": kq}
-        loi_tong.append(f"{ten}: {loi}")
-    return {"ok": False, "reply": "❌ Tất cả AI đều không trả lời:\n" + "\n".join(f"× {x}" for x in loi_tong), "plain": ""}
+        loi_tong.append(f"× {ten}: {loi}")
+    return {"ok": False, "reply": "❌ Tất cả AI đều không trả lời:\n" + "\n".join(loi_tong), "plain": ""}
 
 # ==================================================
 # CHUYÊN MỤC
@@ -363,19 +358,19 @@ a{color:var(--c);text-decoration:none}
 </div>
 <script>
 const CARDS = [
- {id:"general",cls:"c-gen",icon:"💬",title:"Trò chuyện chung",ai:"🔵 Gemini → 🟢 Groq",
-  hello:"👋 Xin chào! Tôi dùng AI miễn phí. Hỏi tôi bất kỳ điều gì nhé!",ph:"Nhập câu hỏi...",
+ {id:"general",cls:"c-gen",icon:"💬",title:"Trò chuyện chung",ai:"🔵 Gemini 3.5 → 🟢 Groq",
+  hello:"👋 Xin chào! Tôi đã sẵn sàng. Hỏi tôi bất kỳ điều gì nhé!",ph:"Nhập câu hỏi...",
   quick:[["🔌 Thủy điện cơ bản","Giải thích khái niệm nhà máy thủy điện"],["📊 Hiệu suất & Tối ưu","Cách nâng cao hiệu suất làm việc"],["📋 Quy trình chung","Trình bày quy trình làm việc chuẩn"],["💡 Ý tưởng & Đề xuất","Đề xuất ý tưởng cải tiến"]]},
- {id:"data",cls:"c-p1",icon:"📊",title:"Xử lý dữ liệu & Tạo báo cáo",ai:"🔵 Gemini → 🟢 Groq",file:true,sheet:true,
+ {id:"data",cls:"c-p1",icon:"📊",title:"Xử lý dữ liệu & Tạo báo cáo",ai:"🔵 Gemini 3.5 → 🟢 Groq",file:true,sheet:true,
   hello:"👋 Tải tệp, dán link Sheets hoặc nhập yêu cầu — tôi phân tích và xuất Word/Excel nhé!",ph:"Nhập yêu cầu phân tích...",
   quick:[["📋 Tóm tắt dữ liệu","Tóm tắt số liệu chính"],["💰 Tính tổng hợp","Tính tổng, trung bình, xu hướng"],["📑 Báo cáo đầy đủ","Viết báo cáo có cấu trúc"],["📈 Nhận xét & Đề xuất","Đánh giá và đề xuất"]]},
- {id:"doc",cls:"c-p2",icon:"✍️",title:"Soạn thảo văn bản",ai:"🔵 Gemini → 🟢 Groq",
+ {id:"doc",cls:"c-p2",icon:"✍️",title:"Soạn thảo văn bản",ai:"🔵 Gemini 3.5 → 🟢 Groq",
   hello:"👋 Tôi soạn thảo văn bản chuẩn mực Việt Nam. Bạn cần viết gì?",ph:"Nội dung cần soạn thảo...",
   quick:[["📝 Công văn hành chính","Soạn thảo công văn gửi cấp trên"],["📄 Hợp đồng & Thỏa thuận","Soạn thảo hợp đồng mua bán dịch vụ"],["📈 Báo cáo công việc","Báo cáo tiến độ, kết quả thực hiện"],["📋 Thư mời & Biên bản","Thư mời họp, biên bản cuộc họp"]]},
- {id:"tender",cls:"c-p3",icon:"🏆",title:"Quy trình đấu thầu",ai:"🔵 Gemini → 🟢 Groq",
+ {id:"tender",cls:"c-p3",icon:"🏆",title:"Quy trình đấu thầu",ai:"🔵 Gemini 3.5 → 🟢 Groq",
   hello:"👋 Tôi hướng dẫn theo Luật Đấu thầu Việt Nam. Cần hỗ trợ bước nào?",ph:"Hỏi về quy trình đấu thầu...",
   quick:[["📋 Toàn bộ quy trình","Giải thích các bước từ A-Z"],["📑 Hồ sơ mời thầu","Danh mục tài liệu cần chuẩn bị"],["⚖️ Pháp lý & Lưu ý","Điều khoản pháp lý thường gặp"],["📄 Mẫu biểu thông dụng","Danh sách biểu mẫu cần có"]]},
- {id:"equip",cls:"c-p4",icon:"🔧",title:"Quản lý thiết bị",ai:"🔵 Gemini → 🟢 Groq",file:true,
+ {id:"equip",cls:"c-p4",icon:"🔧",title:"Quản lý thiết bị",ai:"🔵 Gemini 3.5 → 🟢 Groq",file:true,
   hello:"👋 Tải danh sách thiết bị hoặc nhập yêu cầu — tôi phân tích nhé!",ph:"Nhập yêu cầu quản lý thiết bị...",
   quick:[["📊 Phân loại thiết bị","Nhóm thiết bị theo chức năng"],["🛠️ Kế hoạch bảo trì","Lập kế hoạch bảo trì định kỳ"],["⚠️ Đánh giá tình trạng","Phân tích rủi ro & đề xuất"],["🔄 Tuổi thọ & Thay thế","Tính tuổi thọ, đề xuất thay thế"]]}
 ];
