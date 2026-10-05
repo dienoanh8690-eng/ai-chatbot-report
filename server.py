@@ -357,7 +357,7 @@ def download(ten_file):
 
 @app.route("/")
 def trang_chu():
-    return r"""
+    return """
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -376,7 +376,6 @@ def trang_chu():
 --p4: #f59e0b; --p4-light: #fef3c7; --p4-bg: #fffbeb;
 --p5: #ec4899; --p5-light: #fce7f3; --p5-bg: #fdf2f8;
 --gray-100: #f1f5f9; --gray-200: #e2e8f0; --gray-600: #475569; --gray-800: #1e293b;
---shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
 --shadow-md: 0 4px 12px rgba(0,0,0,0.06);
 --shadow-lg: 0 10px 30px rgba(37,99,235,0.08);
 --radius-sm: 8px; --radius-md: 12px; --radius-lg: 20px;
@@ -423,9 +422,9 @@ body { background: linear-gradient(135deg, #f0f7ff 0%, #faf5ff 100%); min-height
 .card-p4 .file-bar { background: var(--p4-light); color: #92400e; }
 .file-bar button { margin-left: auto; background: none; border: none; font-size: 18px; cursor: pointer; color: #dc2626; line-height: 1; }
 .sheet-bar { display: flex; gap: 8px; margin-bottom: 12px; }
-.sheet-bar input { flex: 1; padding: 10px 14px; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 13px; outline: none; transition: border-color 0.2s; }
+.sheet-bar input { flex: 1; padding: 10px 14px; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 13px; outline: none; }
 .sheet-bar input:focus { border-color: var(--p1); }
-.sheet-bar button { padding: 10px 16px; border: none; border-radius: var(--radius-sm); background: var(--p1); color: white; cursor: pointer; font-weight: 600; font-size: 13px; transition: background 0.2s; }
+.sheet-bar button { padding: 10px 16px; border: none; border-radius: var(--radius-sm); background: var(--p1); color: white; cursor: pointer; font-weight: 600; font-size: 13px; }
 .sheet-bar button:hover { background: #1d4ed8; }
 .quick-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
 .q-btn { padding: 10px 12px; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); background: white; cursor: pointer; font-size: 12px; transition: all 0.2s; text-align: left; line-height: 1.4; }
@@ -450,7 +449,7 @@ body { background: linear-gradient(135deg, #f0f7ff 0%, #faf5ff 100%); min-height
 .dl-word { background: var(--p1-light); color: #1d4ed8; }
 .dl-excel { background: var(--p2-light); color: #15803d; }
 .input-row { display: flex; gap: 10px; align-items: flex-end; }
-textarea { flex: 1; min-height: 48px; max-height: 120px; padding: 12px 18px; border: 1px solid var(--gray-200); border-radius: 24px; font-size: 14px; resize: none; outline: none; transition: all 0.2s; line-height: 1.5; }
+textarea { flex: 1; min-height: 48px; max-height: 120px; padding: 12px 18px; border: 1px solid var(--gray-200); border-radius: 24px; font-size: 14px; resize: none; outline: none; line-height: 1.5; }
 textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
 .card-p1 textarea:focus { border-color: var(--p1); box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
 .card-p2 textarea:focus { border-color: var(--p2); box-shadow: 0 0 0 3px rgba(22,163,74,0.1); }
@@ -706,20 +705,21 @@ function connectSheet(){
 }
 
 function handleKey(e, fn){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); fn(); } }
-function addMsg(chatId, type, text, links=''){
+function addMsg(chatId, type, text, links){
     const c = document.getElementById(chatId);
     const d = document.createElement('div'); d.className = 'msg '+type;
     let cls = '';
     if(text.includes('⚠️')) cls=' warn';
     else if(text.includes('❌')) cls=' err';
-    d.innerHTML = `<div class="bubble${cls}">${text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}${links}</div>`;
+    const safeText = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    d.innerHTML = '<div class="bubble'+cls+'">'+safeText+(links||'')+'</div>';
     c.appendChild(d); c.scrollTop = c.scrollHeight;
 }
 function dlLinks(d){
     let h='';
-    if(d.word) h += `<a href="${d.word}" class="dl-btn dl-word" target="_blank">📄 Tải Word</a>`;
-    if(d.excel) h += `<a href="${d.excel}" class="dl-btn dl-excel" target="_blank">📊 Tải Excel</a>`;
-    return h ? `<div class="dl-group">${h}</div>` : '';
+    if(d.word) h += '<a href="'+d.word+'" class="dl-btn dl-word" target="_blank">📄 Tải Word</a>';
+    if(d.excel) h += '<a href="'+d.excel+'" class="dl-btn dl-excel" target="_blank">📊 Tải Excel</a>';
+    return h ? '<div class="dl-group">'+h+'</div>' : '';
 }
 
 async function sendGen(){
@@ -769,5 +769,4 @@ function quickTender(t){ document.getElementById('input3').value=t; sendTender()
 
 async function sendEquip(){
     const i = document.getElementById('input4');
-    const m = i.value.trim(); if(!m && !file4Content) return;
-    addMsg('chat4','user',m||'Phân tích thiết bị
+    const m = i.value.trim(); if(!m && !file
