@@ -12,19 +12,19 @@ app = Flask(__name__)
 CORS(app)
 
 # ==================================================
-# CẤU HÌNH API KEY
+# CẤU HÌNH API KEY — Đặt ở biến môi trường Render
 # ==================================================
 AI_API_KEY = os.environ.get("AI_API_KEY", "").strip()
 AI_URL = "https://api.aimlapi.com/v1/chat/completions"
 AI_MODEL = "bytedance/dola-seed-2-0-pro"
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-2.0-flash-exp"
+GEMINI_MODEL = "gemini-2.0-flash"
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3-1-8b-instant"
+GROQ_MODEL = "llama-3.1-8b-instant"
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
@@ -73,7 +73,11 @@ def goi_gemini(prompt, he_thong=""):
 
 Yêu cầu: {prompt}"""
     try:
-        res = requests.post(GEMINI_API_URL, json={"contents": [{"parts": [{"text": full_text}]}]}, timeout=90)
+        res = requests.post(
+            GEMINI_API_URL,
+            json={"contents": [{"parts": [{"text": full_text}]}]},
+            timeout=90
+        )
         if res.status_code == 200:
             data = res.json()
             if "candidates" in data:
@@ -269,16 +273,13 @@ def connect_sheet():
     return jsonify({"status": "ok", "content": noi_dung[:5000]})
 
 
-# ===== 🔵 TRÒ CHUYỆN CHUNG =====
 @app.route("/api/chat-general", methods=["POST"])
 def chat_general():
-    """💬 Trò chuyện chung — DOLA/AIML → Gemini → GPT → Claude"""
     data = request.get_json(silent=True) or {}
     msg = data.get("message", "").strip()
     if not msg:
         return jsonify({"reply": "Vui lòng nhập câu hỏi!"})
     he_thong = "Bạn là trợ lý AI tổng hợp, thông minh, hữu ích. Trả lời rõ ràng, dễ hiểu, bằng tiếng Việt."
-    
     danh_sach = [goi_aiml, goi_gemini, goi_gpt, goi_claude]
     tra_loi = goi_theo_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
@@ -286,7 +287,6 @@ def chat_general():
 
 @app.route("/api/chat-data", methods=["POST"])
 def chat_data():
-    """📊 Xử lý dữ liệu — DOLA/AIML → Gemini → Llama/Groq"""
     data = request.get_json(silent=True) or {}
     msg = data.get("message", "").strip()
     file_content = data.get("file_content", "")
@@ -296,10 +296,8 @@ def chat_data():
         return jsonify({"reply": "Vui lòng nhập yêu cầu, tải tệp hoặc dán link Google Sheets!"})
     prompt = f"{msg}\n\nDữ liệu phân tích:\n{full_data}" if full_data else msg
     he_thong = "Bạn là chuyên gia phân tích dữ liệu và tạo báo cáo. Trả lời rõ ràng, tóm tắt số liệu quan trọng, dùng bảng khi phù hợp."
-    
     danh_sach = [goi_aiml, goi_gemini, goi_groq]
     tra_loi = goi_theo_danh_sach(prompt, danh_sach, he_thong)
-    
     word = tao_word(tra_loi) if "✅" in tra_loi else ""
     excel = tao_excel(tra_loi) if "✅" in tra_loi else ""
     return jsonify({
@@ -311,13 +309,11 @@ def chat_data():
 
 @app.route("/api/chat-doc", methods=["POST"])
 def chat_doc():
-    """✍️ Soạn thảo — DOLA/AIML → GPT → Claude"""
     data = request.get_json(silent=True) or {}
     msg = data.get("message", "").strip()
     if not msg:
         return jsonify({"reply": "Vui lòng nhập yêu cầu soạn thảo!"})
     he_thong = "Bạn là chuyên gia soạn thảo văn bản hành chính, hợp đồng, thư từ. Viết chuẩn mực, đúng thể thức Việt Nam."
-    
     danh_sach = [goi_aiml, goi_gpt, goi_claude]
     tra_loi = goi_theo_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
@@ -325,13 +321,11 @@ def chat_doc():
 
 @app.route("/api/chat-tender", methods=["POST"])
 def chat_tender():
-    """🏆 Đấu thầu — DOLA/AIML → Gemini → Llama/Groq"""
     data = request.get_json(silent=True) or {}
     msg = data.get("message", "").strip()
     if not msg:
         return jsonify({"reply": "Vui lòng nhập yêu cầu về quy trình đấu thầu!"})
     he_thong = "Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, hồ sơ, lưu ý pháp lý."
-    
     danh_sach = [goi_aiml, goi_gemini, goi_groq]
     tra_loi = goi_theo_danh_sach(msg, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
@@ -339,7 +333,6 @@ def chat_tender():
 
 @app.route("/api/chat-equip", methods=["POST"])
 def chat_equip():
-    """🔧 Thiết bị — DOLA/AIML → Gemini → Llama/Groq"""
     data = request.get_json(silent=True) or {}
     msg = data.get("message", "").strip()
     file_content = data.get("file_content", "")
@@ -347,7 +340,6 @@ def chat_equip():
     if not msg and not file_content:
         return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải danh sách thiết bị!"})
     he_thong = "Bạn là chuyên gia quản lý thiết bị nhà máy. Phân loại, theo dõi tình trạng, đề xuất bảo trì, tính tuổi thọ."
-    
     danh_sach = [goi_aiml, goi_gemini, goi_groq]
     tra_loi = goi_theo_danh_sach(full_prompt, danh_sach, he_thong)
     return jsonify({"reply": tra_loi})
@@ -473,7 +465,6 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 .card-p5 .send-btn { background: var(--p5); }
 .send-btn:hover:not(:disabled) { transform: scale(1.1); }
 .hidden { display: none !important; }
-/* ===== Ô THÔNG TIN LIÊN HỆ ===== */
 .contact-content { padding: 10px 0; line-height: 2; font-size: 14px; color: var(--gray-700); }
 .contact-row { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--gray-100); }
 .contact-row:last-child { border-bottom: none; }
@@ -491,39 +482,33 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 <div class="grid">
 
-<!-- 🔵 TRÒ CHUYỆN CHUNG -->
 <div class="card card-gen">
 <div class="card-head">
 <span class="card-icon">💬</span>
 <h3 class="card-title">Trò chuyện chung</h3>
 <span class="card-ai">DOLA/AIML → Gemini → GPT → Claude</span>
 </div>
-
 <div class="quick-btns">
 <button class="q-btn" onclick="quickGen('Giải thích khái niệm về nhà máy thủy điện')">🔌 Thủy điện cơ bản</button>
 <button class="q-btn" onclick="quickGen('Tóm tắt tin tức công nghệ mới nhất')">📰 Tin tức & Công nghệ</button>
 <button class="q-btn" onclick="quickGen('Đề xuất ý tưởng tối ưu hóa hiệu suất làm việc')">💡 Ý tưởng & Đề xuất</button>
 <button class="q-btn" onclick="quickGen('Giải đáp thắc mắc chung về pháp luật')">⚖️ Pháp luật chung</button>
 </div>
-
 <div class="chat-area" id="chat0">
 <div class="msg ai"><div class="bubble">👋 Xin chào! Tôi là trợ lý AI tổng hợp. Bạn có thể hỏi bất kỳ điều gì, tôi sẽ cố gắng trả lời nhanh nhất nhé!</div></div>
 </div>
-
 <div class="input-row">
 <textarea id="input0" placeholder="Hỏi bất kỳ điều gì..." onkeydown="handleKey(event, sendGen)"></textarea>
 <button class="send-btn" id="btn0" onclick="sendGen()">➤</button>
 </div>
 </div>
 
-<!-- 📊 XỬ LÝ DỮ LIỆU & TẠO BÁO CÁO -->
 <div class="card card-p1">
 <div class="card-head">
 <span class="card-icon">📊</span>
 <h3 class="card-title">Xử lý dữ liệu & Tạo báo cáo</h3>
 <span class="card-ai">DOLA/AIML → Gemini → Llama</span>
 </div>
-
 <div class="upload-zone" id="uploadZone1" onclick="document.getElementById('fileInput1').click()">
 <p>📎 Nhấn chọn hoặc kéo thả tệp (.xlsx, .txt)</p>
 </div>
@@ -532,7 +517,6 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 <span id="fName1"></span>
 <button onclick="clearFile1()">✕</button>
 </div>
-
 <div class="sheet-bar">
 <input type="text" id="sheetUrl" placeholder="🔗 Dán link Google Sheets...">
 <button onclick="connectSheet()">Kết nối</button>
@@ -541,82 +525,69 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 <span>✅ Google Sheets đã kết nối</span>
 <button onclick="clearSheet()">✕</button>
 </div>
-
 <div class="quick-btns">
 <button class="q-btn" onclick="quickData('Sắp xếp và tóm tắt dữ liệu')">📋 Sắp xếp dữ liệu</button>
 <button class="q-btn" onclick="quickData('Tính tổng và phân tích số liệu')">💰 Tính tổng hợp</button>
 <button class="q-btn" onclick="quickData('Lập báo cáo đầy đủ có cấu trúc')">📑 Lập báo cáo</button>
 <button class="q-btn" onclick="quickData('Đánh giá xu hướng và đề xuất')">📈 Nhận xét & Đề xuất</button>
 </div>
-
 <div class="chat-area" id="chat1">
 <div class="msg ai"><div class="bubble">👋 Tải tệp, dán link Google Sheets hoặc nhập yêu cầu để bắt đầu phân tích nhé!</div></div>
 </div>
-
 <div class="input-row">
 <textarea id="input1" placeholder="Nhập yêu cầu phân tích..." onkeydown="handleKey(event, sendData)"></textarea>
 <button class="send-btn" id="btn1" onclick="sendData()">➤</button>
 </div>
 </div>
 
-<!-- ✍️ SOẠN THẢO VĂN BẢN -->
 <div class="card card-p2">
 <div class="card-head">
 <span class="card-icon">✍️</span>
 <h3 class="card-title">Soạn thảo văn bản</h3>
 <span class="card-ai">DOLA/AIML → GPT → Claude</span>
 </div>
-
 <div class="quick-btns">
 <button class="q-btn" onclick="quickDoc('Soạn thảo công văn gửi cấp trên')">📝 Công văn</button>
 <button class="q-btn" onclick="quickDoc('Soạn thảo hợp đồng mua bán thiết bị')">📄 Hợp đồng</button>
 <button class="q-btn" onclick="quickDoc('Viết báo cáo tiến độ thực hiện dự án')">📈 Báo cáo tiến độ</button>
 <button class="q-btn" onclick="quickDoc('Soạn thảo thư mời họp và biên bản')">📋 Thư & Biên bản</button>
 </div>
-
 <div class="chat-area" id="chat2">
 <div class="msg ai"><div class="bubble">👋 Tôi sẽ giúp bạn soạn thảo văn bản chuẩn mực, đúng thể thức Việt Nam. Bạn cần viết gì?</div></div>
 </div>
-
 <div class="input-row">
 <textarea id="input2" placeholder="Bạn cần soạn thảo gì...?" onkeydown="handleKey(event, sendDoc)"></textarea>
 <button class="send-btn" id="btn2" onclick="sendDoc()">➤</button>
 </div>
 </div>
 
-<!-- 🏆 QUY TRÌNH ĐẤU THẦU -->
 <div class="card card-p3">
 <div class="card-head">
 <span class="card-icon">🏆</span>
 <h3 class="card-title">Quy trình đấu thầu</h3>
 <span class="card-ai">DOLA/AIML → Gemini → Llama</span>
 </div>
-
 <div class="quick-btns">
 <button class="q-btn" onclick="quickTender('Giải thích toàn bộ quy trình đấu thầu')">📋 Toàn bộ quy trình</button>
 <button class="q-btn" onclick="quickTender('Danh mục hồ sơ cần chuẩn bị')">📑 Hồ sơ mời thầu</button>
 <button class="q-btn" onclick="quickTender('Lưu ý pháp lý và rủi ro thường gặp')">⚖️ Pháp lý & Rủi ro</button>
 <button class="q-btn" onclick="quickTender('Mẫu biểu mẫu thông dụng')">📄 Biểu mẫu</button>
 </div>
-
 <div class="chat-area" id="chat3">
 <div class="msg ai"><div class="bubble">👋 Tôi hướng dẫn chi tiết theo quy định Việt Nam. Bạn cần hỗ trợ về bước nào?</div></div>
 </div>
-
 <div class="input-row">
 <textarea id="input3" placeholder="Hỏi về quy trình đấu thầu...?" onkeydown="handleKey(event, sendTender)"></textarea>
 <button class="send-btn" id="btn3" onclick="sendTender()">➤</button>
 </div>
 </div>
 
-<!-- 🔧 QUẢN LÝ THIẾT BỊ -->
 <div class="card card-p4">
 <div class="card-head">
 <span class="card-icon">🔧</span>
 <h3 class="card-title">Quản lý thiết bị</h3>
 <span class="card-ai">DOLA/AIML → Gemini → Llama</span>
 </div>
-
 <div class="upload-zone" id="uploadZone4" onclick="document.getElementById('fileInput4').click()">
 <p>📎 Tải danh sách thiết bị (.xlsx, .txt)</p>
 </div>
@@ -625,31 +596,26 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 <span id="fName4"></span>
 <button onclick="clearFile4()">✕</button>
 </div>
-
 <div class="quick-btns">
 <button class="q-btn" onclick="quickEquip('Phân loại thiết bị theo nhóm')">📊 Phân loại thiết bị</button>
 <button class="q-btn" onclick="quickEquip('Đề xuất kế hoạch bảo trì định kỳ')">🛠️ Kế hoạch bảo trì</button>
 <button class="q-btn" onclick="quickEquip('Đánh giá tình trạng và rủi ro')">⚠️ Đánh giá rủi ro</button>
 <button class="q-btn" onclick="quickEquip('Tính tuổi thọ và đề xuất thay thế')">🔄 Tuổi thọ & Thay thế</button>
 </div>
-
 <div class="chat-area" id="chat4">
 <div class="msg ai"><div class="bubble">👋 Tải danh sách thiết bị hoặc nhập yêu cầu — tôi sẽ phân tích chi tiết nhé!</div></div>
 </div>
-
 <div class="input-row">
 <textarea id="input4" placeholder="Nhập yêu cầu quản lý thiết bị...?" onkeydown="handleKey(event, sendEquip)"></textarea>
 <button class="send-btn" id="btn4" onclick="sendEquip()">➤</button>
 </div>
 </div>
 
-<!-- 📌 THÔNG TIN LIÊN HỆ -->
 <div class="card card-p5">
 <div class="card-head">
 <span class="card-icon">📌</span>
 <h3 class="card-title">Thông tin liên hệ</h3>
 </div>
-
 <div class="contact-content">
 <div class="contact-row">
 <span class="contact-icon">👤</span>
@@ -687,7 +653,6 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 <span class="contact-value"><a href="https://namchien.vn" target="_blank">namchien.vn</a></span>
 </div>
 </div>
-
 <div style="margin-top: auto; padding-top: 16px; text-align: center; font-size: 12px; color: #9ca3af;">
 <p>Hệ thống hỗ trợ công việc nội bộ</p>
 <p>© 2026 Công ty Cổ phần Thủy điện Nậm Chiến</p>
@@ -756,7 +721,6 @@ function dlLinks(d){
     return h ? `<div class="dl-group">${h}</div>` : '';
 }
 
-// ===== TRÒ CHUYỆN CHUNG =====
 async function sendGen(){
     const i = document.getElementById('input0');
     const m = i.value.trim(); if(!m) return;
@@ -787,3 +751,9 @@ async function sendDoc(){
     document.getElementById('btn2').disabled=true; document.getElementById('btn2').textContent='⏳';
     const r = await fetch('/api/chat-doc', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:m})});
     const d = await r.json(); addMsg('chat2','ai',d.reply);
+    document.getElementById('btn2').disabled=false; document.getElementById('btn2').textContent='➤';
+}
+function quickDoc(t){ document.getElementById('input2').value=t; sendDoc(); }
+
+async function sendTender(){
+    const i
