@@ -2,20 +2,23 @@ import os
 import re
 import uuid
 from datetime import datetime
-import requests
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from docx import Document
 from openpyxl import Workbook, load_workbook
+import requests
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 CORS(app)
 
-# Đọc khóa từ biến môi trường Render
+# === BIẾN MÔI TRƯỜNG — KIỂM TRA KỸ ===
 OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY", "").strip()
+print(f"🔑 OPENROUTER_KEY có giá trị: {'Đã có' if OPENROUTER_KEY else '❌ TRỐNG'}", flush=True)
+if OPENROUTER_KEY:
+    print(f"🔑 Định dạng: {OPENROUTER_KEY[:15]}...", flush=True)
 
-# Các mô hình
+# === CẤU HÌNH MÔ HÌNH ===
 MODEL_CLAUDE = "anthropic/claude-3.5-sonnet"
 MODEL_GEMINI = "google/gemini-2.0-flash-exp"
 MODEL_DOLA  = "bytedance/dola-seed-2-0-pro"
@@ -29,14 +32,12 @@ os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 MAC_DINH = "Trả lời bằng tiếng Việt rõ ràng, tự nhiên, dễ hiểu, chính xác."
 
-# ==================================================
-# GỌI AI QUA OPENROUTER
-# ==================================================
+# === GỌI AI QUA OPENROUTER ===
 def goi_ai_openrouter(ten_ai, model_id, prompt, he_thong=""):
     if not OPENROUTER_KEY:
         return ten_ai, None, "❌ Chưa đặt biến OPENROUTER_KEY trên Render"
     if not OPENROUTER_KEY.startswith("sk-or-v1-"):
-        return ten_ai, None, "❌ Khóa OpenRouter sai định dạng"
+        return ten_ai, None, "❌ Khóa OpenRouter sai định dạng (phải bắt đầu sk-or-v1-)"
     
     url = "https://openrouter.ai/api/v1/chat/completions"
     try:
@@ -60,25 +61,25 @@ def goi_ai_openrouter(ten_ai, model_id, prompt, he_thong=""):
             timeout=TIMEOUT,
         )
         
+        print(f"📡 {ten_ai} — Mã trạng thái: {res.status_code}", flush=True)
+        
         if res.status_code == 200:
             data = res.json()
             text = data["choices"][0]["message"]["content"].strip()
             return ten_ai, text, None
         elif res.status_code == 401:
-            return ten_ai, None, "❌ Khóa OpenRouter sai/hết hạn"
+            return ten_ai, None, "❌ Khóa OpenRouter không hợp lệ/hết hạn — kiểm tra lại biến môi trường"
         else:
-            return ten_ai, None, f"Lỗi {res.status_code}"
+            return ten_ai, None, f"Lỗi {res.status_code}: {res.text[:200]}"
             
     except Exception as e:
-        return ten_ai, None, f"Lỗi kết nối: {str(e)[:60]}"
+        return ten_ai, None, f"Lỗi kết nối: {str(e)[:80]}"
 
-# ==================================================
-# PHÂN BỐ AI THEO CHỨC NĂNG
-# ==================================================
+# === PHÂN BỐ AI ===
 def goi_soan_thao(prompt, he_thong=""):
     ten, kq, loi = goi_ai_openrouter("🟣 Claude", MODEL_CLAUDE, prompt, he_thong)
     if kq: return ten, kq, loi
-    return goi_ai_openrouter("🔵 Llama", MODEL_LLAMA, prompt, he_thong)
+    return goi_ai_openrouter("🟢 Llama", MODEL_LLAMA, prompt, he_thong)
 
 def goi_dau_thau(prompt, he_thong=""):
     ten, kq, loi = goi_ai_openrouter("🔵 Gemini", MODEL_GEMINI, prompt, he_thong)
@@ -93,9 +94,6 @@ def goi_thiet_bi(prompt, he_thong=""):
 def goi_phan_tich(prompt, he_thong=""):
     return goi_ai_openrouter("🔵 Gemini", MODEL_GEMINI, prompt, he_thong)
 
-# ==================================================
-# CẤU HÌNH
-# ==================================================
 CHATS = {
     "doc": ("Chuyên gia soạn thảo văn bản chuẩn Việt Nam. Viết trang trọng, đúng thể thức.", goi_soan_thao),
     "tender": ("Chuyên gia đấu thầu theo Luật Việt Nam. Hướng dẫn chi tiết từng bước.", goi_dau_thau),
@@ -103,9 +101,7 @@ CHATS = {
     "data": ("Chuyên gia phân tích dữ liệu & lập báo cáo. Tóm tắt, dùng bảng, ngắn gọn.", goi_phan_tich),
 }
 
-# ==================================================
-# XUẤT FILE
-# ==================================================
+# === XUẤT FILE ===
 def _sach(dong): return re.sub(r"[*#`]+", "", dong).strip()
 
 def tao_word(nd):
@@ -149,21 +145,23 @@ def tao_excel(nd):
 def doc_google_sheet(url):
     try:
         m = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
-        if not m: return None, "Link không hợp lệ"
+        if not m: return None, "Link không hợp lệ — phải có dạng /spreadsheets/d/ID..."
         r = requests.get(f"https://docs.google.com/spreadsheets/d/{m.group(1)}/export?format=csv", timeout=15)
         if r.status_code == 200: return r.text, None
-        return None, "Chia sẻ Sheet → Bất kỳ ai có đường liên kết"
-    except Exception as e: return None, f"Lỗi: {e}"
+        return None, "Vui lòng chia sẻ Sheet → Quyền: Bất kỳ ai có đường liên kết"
+    except Exception as e: return None, f"Lỗi: {str(e)[:60]}"
 
-# ==================================================
-# API
-# ==================================================
+# === API ===
 @app.route("/api/upload", methods=["POST"])
 def upload():
-    if "file" not in request.files: return jsonify({"error": "Không có tệp"}), 400
+    print("📤 Nhận yêu cầu tải tệp", flush=True)
+    if "file" not in request.files:
+        print("❌ Không có tệp", flush=True)
+        return jsonify({"error": "Không có tệp"}), 400
     f = request.files["file"]
     ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
-    if ext not in ("xlsx", "csv", "txt"): return jsonify({"error": "Chỉ hỗ trợ .xlsx, .csv, .txt"}), 400
+    if ext not in ("xlsx", "csv", "txt"):
+        return jsonify({"error": "Chỉ hỗ trợ .xlsx, .csv, .txt"}), 400
     path = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4().hex[:10]}.{ext}")
     f.save(path)
     nd = ""
@@ -181,7 +179,8 @@ def upload():
             with open(path, "r", encoding="utf-8-sig", errors="ignore") as fh:
                 nd = fh.read()
     except Exception as e:
-        nd = f"Lỗi: {e}"
+        nd = f"Lỗi đọc tệp: {e}"
+    print(f"✅ Đọc được {len(nd)} ký tự", flush=True)
     return jsonify({"status": "ok", "name": f.filename, "content": nd[:6000]})
 
 @app.route("/api/connect-sheet", methods=["POST"])
@@ -195,15 +194,22 @@ def connect_sheet():
 
 @app.route("/api/chat/<kind>", methods=["POST"])
 def chat(kind):
-    if kind not in CHATS: return jsonify({"reply": "Chức năng không tồn tại"}), 404
+    print(f"💬 Nhận tin nhắn — loại: {kind}", flush=True)
+    if kind not in CHATS:
+        return jsonify({"reply": "Chức năng không tồn tại"}), 404
     data = request.get_json(silent=True) or {}
     msg = (data.get("message") or "").strip()
     ctx = "\n---\n".join(x for x in [(data.get("file_content") or "")[:6000],
                                       (data.get("sheet_content") or "")[:6000]] if x.strip())
-    if not msg and not ctx: return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải dữ liệu!"})
+    if not msg and not ctx:
+        return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải dữ liệu!"})
+    
     prompt = f"{msg or 'Phân tích dữ liệu sau'}\n\nDữ liệu:\n{ctx}" if ctx else msg
     he_thong, goi_ham = CHATS[kind]
+    
+    print(f"📤 Gọi AI với prompt: {prompt[:80]}...", flush=True)
     ten, kq, loi = goi_ham(prompt, he_thong)
+    
     out = {"reply": "", "word": "", "excel": ""}
     if kq:
         out["reply"] = f"✅ [{ten}]\n{kq}"
@@ -211,19 +217,22 @@ def chat(kind):
             w, x = tao_word(kq), tao_excel(kq)
             out["word"] = f"/download/{w}" if w else ""
             out["excel"] = f"/download/{x}" if x else ""
+        print(f"✅ Trả lời thành công", flush=True)
     else:
         out["reply"] = f"❌ [{ten}]\n{loi}"
+        print(f"❌ Lỗi: {loi}", flush=True)
     return jsonify(out)
 
 @app.route("/download/<ten>")
-def download(ten): return send_from_directory(RESULT_FOLDER, os.path.basename(ten), as_attachment=True)
+def download(ten):
+    return send_from_directory(RESULT_FOLDER, os.path.basename(ten), as_attachment=True)
 
 @app.route("/")
-def index(): return TRANG_CHU
+def index():
+    print("🏠 Trang chủ được tải", flush=True)
+    return TRANG_CHU
 
-# ==================================================
-# GIAO DIỆN — ĐÃ SỬA NÚT GỬI HOẠT ĐỘNG
-# ==================================================
+# === GIAO DIỆN — ĐÃ SỬA TOÀN BỘ ===
 TRANG_CHU = r'''<!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -283,7 +292,7 @@ a{color:var(--c);text-decoration:none}
 <body>
 <div class="header">
 <h1>⚡ All Thủy Điện — Hệ thống hỗ trợ</h1>
-<p>Soạn thảo · Đấu thầu · Quản lý thiết bị · Phân tích dữ liệu — Dùng chung khóa với Facebook ✅</p>
+<p>Soạn thảo · Đấu thầu · Quản lý thiết bị · Phân tích dữ liệu</p>
 </div>
 <div class="grid">
 <!-- CỘT 1: Soạn thảo văn bản -->
@@ -293,12 +302,12 @@ a{color:var(--c);text-decoration:none}
 <button class="q-btn" data-preset="Soạn thảo công văn gửi cấp trên về tiến độ thực hiện dự án">Công văn hành chính</button>
 <button class="q-btn" data-preset="Soạn thảo hợp đồng cung cấp dịch vụ kỹ thuật theo chuẩn nhà nước">Hợp đồng & Thỏa thuận</button>
 <button class="q-btn" data-preset="Viết báo cáo công việc tháng, nêu kết quả, khó khăn, kế hoạch tháng sau">Báo cáo công việc</button>
-<button class="q-btn" data-preset="Soạn thảo biên bản cuộc họp đánh giá tiến độ công trình">Thư mời & Biên bản</button>
+<button class="q-btn" data-preset="Soạn thảo biên bản cuộc họp đánh giá tiến độ công trình">Biên bản cuộc họp</button>
 </div>
 <div class="chat-area" id="ch-doc">
 <div class="msg ai"><div class="bubble">👋 Xin chào! Tôi dùng <strong>Claude</strong> chuyên soạn thảo văn bản chuẩn Việt Nam. Bạn cần viết gì?</div></div>
 </div>
-<div class="input-row"><textarea id="in-doc" placeholder="Nội dung cần soạn thảo..."></textarea><button class="send-btn" id="sd-doc">➤</button></div>
+<div class="input-row"><textarea id="in-doc" placeholder="Nội dung cần soạn thảo..."></textarea><button class="send-btn" id="sd-doc" title="Gửi">➤</button></div>
 </div>
 
 <!-- CỘT 2: Quy trình đấu thầu -->
@@ -308,12 +317,12 @@ a{color:var(--c);text-decoration:none}
 <button class="q-btn" data-preset="Trình bày toàn bộ quy trình đấu thầu từ chuẩn bị đến nghiệm thu theo Luật Đấu thầu">Toàn bộ quy trình</button>
 <button class="q-btn" data-preset="Liệt kê chi tiết hồ sơ mời thầu cần chuẩn bị cho gói cung cấp thiết bị">Hồ sơ mời thầu</button>
 <button class="q-btn" data-preset="Giải thích các điều khoản pháp lý quan trọng cần lưu ý khi đấu thầu">Pháp lý & Lưu ý</button>
-<button class="q-btn" data-preset="Danh sách các biểu mẫu thông dụng trong quá trình đấu thầu">Mẫu biểu thông dụng</button>
+<button class="q-btn" data-preset="Danh sách các biểu mẫu thông dụng trong quá trình đấu thầu">Biểu mẫu thông dụng</button>
 </div>
 <div class="chat-area" id="ch-tender">
 <div class="msg ai"><div class="bubble">👋 Tôi dùng <strong>Gemini + Meta</strong> hướng dẫn theo Luật Đấu thầu Việt Nam. Cần hỗ trợ bước nào?</div></div>
 </div>
-<div class="input-row"><textarea id="in-tender" placeholder="Hỏi về quy trình đấu thầu..."></textarea><button class="send-btn" id="sd-tender">➤</button></div>
+<div class="input-row"><textarea id="in-tender" placeholder="Hỏi về quy trình đấu thầu..."></textarea><button class="send-btn" id="sd-tender" title="Gửi">➤</button></div>
 </div>
 
 <!-- CỘT 3: Quản lý thiết bị -->
@@ -331,7 +340,7 @@ a{color:var(--c);text-decoration:none}
 <div class="chat-area" id="ch-equip">
 <div class="msg ai"><div class="bubble">👋 Tôi dùng <strong>Dola + Meta</strong> phân tích thiết bị. Tải danh sách hoặc nhập yêu cầu nhé!</div></div>
 </div>
-<div class="input-row"><textarea id="in-equip" placeholder="Nhập yêu cầu quản lý thiết bị..."></textarea><button class="send-btn" id="sd-equip">➤</button></div>
+<div class="input-row"><textarea id="in-equip" placeholder="Nhập yêu cầu quản lý thiết bị..."></textarea><button class="send-btn" id="sd-equip" title="Gửi">➤</button></div>
 </div>
 
 <!-- DÒNG DƯỚI: Dữ liệu & Thông tin -->
@@ -351,7 +360,7 @@ a{color:var(--c);text-decoration:none}
 <div class="chat-area" id="ch-data">
 <div class="msg ai"><div class="bubble">👋 Tôi dùng <strong>Gemini</strong> phân tích dữ liệu và xuất Word/Excel. Tải tệp hoặc dán link Sheets nhé!</div></div>
 </div>
-<div class="input-row"><textarea id="in-data" placeholder="Nhập yêu cầu phân tích..."></textarea><button class="send-btn" id="sd-data">➤</button></div>
+<div class="input-row"><textarea id="in-data" placeholder="Nhập yêu cầu phân tích..."></textarea><button class="send-btn" id="sd-data" title="Gửi">➤</button></div>
 </div>
 
 <div class="card c-info">
@@ -366,7 +375,6 @@ a{color:var(--c);text-decoration:none}
 </div>
 <div style="margin-top:auto;padding-top:14px;text-align:center;font-size:11.5px;color:#9ca3af">
 <p>© 2026 — Hệ thống hỗ trợ công việc nội bộ</p>
-<p style="margin-top:4px">🔑 Chạy chung khóa với Facebook ✅</p>
 </div>
 </div>
 </div>
@@ -389,8 +397,11 @@ function addMsg(kind, type, text, d){
 }
 
 async function call(path, opts){
+  opts = opts || {};
   opts.headers = Object.assign({}, opts.headers || {});
+  console.log("📡 Gọi:", path, opts, flush=true);
   const r = await fetch(path, opts);
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
@@ -398,20 +409,26 @@ async function send(kind, preset){
   const i = $("in-"+kind), s = ST[kind] || {};
   const m = (preset !== undefined ? preset : i.value).trim();
   if(!m && !s.file && !s.sheet) return;
-  addMsg(kind, "user", m || "Phân tích dữ liệu"); i.value = "";
-  const btn = $("sd-"+kind); btn.disabled = true; btn.textContent = "⏳";
+  
+  addMsg(kind, "user", m || "Phân tích dữ liệu");
+  i.value = "";
+  
+  const btn = $("sd-"+kind); 
+  btn.disabled = true; btn.textContent = "⏳";
+  
   try{
     const d = await call("/api/chat/"+kind, {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({
-        message:m,
-        file_content:(s.file||"")[:6000],
-        sheet_content:(s.sheet||"")[:6000]
+        message: m,
+        file_content: (s.file || "").substring(0, 6000),
+        sheet_content: (s.sheet || "").substring(0, 6000)
       })
     });
     addMsg(kind, "ai", d.reply || "❌ Không có phản hồi", d);
   }catch(e){
+    console.error("Lỗi gọi API:", e);
     addMsg(kind, "ai", "❌ Không kết nối được — nếu mới khởi động, vui lòng chờ 30-60 giây thử lại nhé!");
   }finally{
     btn.disabled = false; btn.textContent = "➤";
@@ -424,21 +441,21 @@ async function upload(kind, f){
     const d = await call("/api/upload", {method:"POST", body:fd});
     if(d.status === "ok"){
       ST[kind].file = d.content;
-      $("fb-"+kind).firstChild.textContent = "📎 "+d.name;
+      $("fb-"+kind).querySelector("span").textContent = "📎 "+d.name;
       $("fb-"+kind).classList.remove("hidden");
     } else alert(d.error);
-  }catch(e){ alert("Không tải được tệp"); }
+  }catch(e){ alert("Không tải được tệp: " + e.message); }
 }
 
 // === SOẠN THẢO ===
 $("in-doc").addEventListener("keydown", e => { if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send("doc"); } });
 $("sd-doc").onclick = () => send("doc");
-document.querySelectorAll("#ch-doc").forEach(c => c.parentElement.querySelectorAll(".q-btn").forEach(b => b.onclick = () => send("doc", b.dataset.preset)));
+document.querySelectorAll(".card.c-doc .q-btn").forEach(b => b.onclick = () => send("doc", b.dataset.preset));
 
 // === ĐẤU THẦU ===
 $("in-tender").addEventListener("keydown", e => { if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send("tender"); } });
 $("sd-tender").onclick = () => send("tender");
-document.querySelectorAll("#ch-tender").forEach(c => c.parentElement.querySelectorAll(".q-btn").forEach(b => b.onclick = () => send("tender", b.dataset.preset)));
+document.querySelectorAll(".card.c-tender .q-btn").forEach(b => b.onclick = () => send("tender", b.dataset.preset));
 
 // === THIẾT BỊ ===
 $("in-equip").addEventListener("keydown", e => { if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send("equip"); } });
@@ -449,7 +466,7 @@ $("up-equip").ondragover = e => { e.preventDefault(); $("up-equip").classList.ad
 $("up-equip").ondragleave = () => $("up-equip").classList.remove("drag");
 $("up-equip").ondrop = e => { e.preventDefault(); $("up-equip").classList.remove("drag"); if(e.dataTransfer.files[0]) upload("equip", e.dataTransfer.files[0]); };
 $("fb-equip").querySelector("button").onclick = () => { ST.equip.file=""; $("fi-equip").value=""; $("fb-equip").classList.add("hidden"); };
-document.querySelectorAll("#ch-equip").forEach(c => c.parentElement.querySelectorAll(".q-btn").forEach(b => b.onclick = () => send("equip", b.dataset.preset)));
+document.querySelectorAll(".card.c-equip .q-btn").forEach(b => b.onclick = () => send("equip", b.dataset.preset));
 
 // === DỮ LIỆU ===
 $("in-data").addEventListener("keydown", e => { if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send("data"); } });
@@ -466,14 +483,16 @@ $("sb-data").onclick = async () => {
     const d = await call("/api/connect-sheet", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({url})});
     if(d.status === "ok"){ ST.data.sheet = d.content; $("sh-data").classList.remove("hidden"); }
     else alert(d.error);
-  }catch(e){ alert("Lỗi kết nối"); }
+  }catch(e){ alert("Lỗi kết nối: " + e.message); }
 };
 $("sh-data").querySelector("button").onclick = () => { ST.data.sheet=""; $("su-data").value=""; $("sh-data").classList.add("hidden"); };
-document.querySelectorAll("#ch-data").forEach(c => c.parentElement.querySelectorAll(".q-btn").forEach(b => b.onclick = () => send("data", b.dataset.preset)));
+document.querySelectorAll(".card.c-data .q-btn").forEach(b => b.onclick = () => send("data", b.dataset.preset));
 </script>
 </body>
 </html>
 '''
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    print(f"🚀 Server chạy trên cổng {port}", flush=True)
+    app.run(host="0.0.0.0", port=port)
