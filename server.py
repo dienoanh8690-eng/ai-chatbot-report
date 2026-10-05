@@ -4,7 +4,6 @@ import os
 import uuid
 from datetime import datetime
 from docx import Document
-from docx.oxml.ns import qn
 from openpyxl import Workbook, load_workbook
 from flask_cors import CORS
 
@@ -12,7 +11,7 @@ app = Flask(__name__)
 CORS(app)
 
 # ==================================================
-# CẤU HÌNH API KEY — Đặt ở biến môi trường trên Render
+# CẤU HÌNH — Đặt trên Render → Environment Variables
 # ==================================================
 AI_API_KEY = os.environ.get("AI_API_KEY", "").strip()
 AI_URL = "https://api.aimlapi.com/v1/chat/completions"
@@ -181,18 +180,12 @@ def tao_word(noi_dung):
         ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
         duong_dan = os.path.join(RESULT_FOLDER, ten)
         doc = Document()
-        p = doc.add_heading("BÁO CÁO", 0)
-        for run in p.runs:
-            run.font.name = "Arial"
-            run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+        doc.add_heading("BÁO CÁO", 0)
         doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
         doc.add_paragraph("-" * 60)
         for dong in noi_dung.split("\n"):
             if dong.strip():
-                p = doc.add_paragraph(dong.strip())
-                for run in p.runs:
-                    run.font.name = "Arial"
-                    run._element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+                doc.add_paragraph(dong.strip())
         doc.save(duong_dan)
         return ten
     except Exception as e:
@@ -482,6 +475,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 <div class="grid">
 
+<!-- Cột 1: Trò chuyện chung -->
 <div class="card card-gen">
 <div class="card-head">
 <span class="card-icon">💬</span>
@@ -503,6 +497,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 </div>
 
+<!-- Cột 2: Xử lý dữ liệu & Tạo báo cáo -->
 <div class="card card-p1">
 <div class="card-head">
 <span class="card-icon">📊</span>
@@ -540,6 +535,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 </div>
 
+<!-- Cột 3: Soạn thảo văn bản -->
 <div class="card card-p2">
 <div class="card-head">
 <span class="card-icon">✍️</span>
@@ -561,6 +557,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 </div>
 
+<!-- Cột 4: Quy trình đấu thầu -->
 <div class="card card-p3">
 <div class="card-head">
 <span class="card-icon">🏆</span>
@@ -582,6 +579,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 </div>
 
+<!-- Cột 5: Quản lý thiết bị -->
 <div class="card card-p4">
 <div class="card-head">
 <span class="card-icon">🔧</span>
@@ -611,6 +609,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 </div>
 
+<!-- Cột 6: Thông tin liên hệ -->
 <div class="card card-p5">
 <div class="card-head">
 <span class="card-icon">📌</span>
@@ -640,7 +639,7 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 <div class="contact-row">
 <span class="contact-icon">🏭</span>
 <span class="contact-label">Đơn vị:</span>
-<span class="contact-value">Công ty cổ phần thủy điện Nậm Chiến</span>
+<span class="contact-value">Công ty Cổ phần Thủy điện Nậm Chiến</span>
 </div>
 <div class="contact-row">
 <span class="contact-icon">📍</span>
@@ -770,3 +769,6 @@ function quickTender(t){ document.getElementById("input3").value=t; sendTender()
 async function sendEquip(){
     const i = document.getElementById("input4");
     const m = i.value.trim(); if(!m && !file4Content) return;
+    addMsg("chat4","user",m||"Phân tích thiết bị"); i.value="";
+    document.getElementById("btn4").disabled=true; document.getElementById("btn4").textContent="⏳";
+    const r = await fetch("/api/chat-equip",
