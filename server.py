@@ -13,10 +13,10 @@ CORS(app)
 # ==================================================
 # CẤU HÌNH — Điền trên Render → Environment Variables
 # ==================================================
-# Gemini — lấy tại: https://aistudio.google.com/app/apikey
+# Gemini 3.5 — lấy tại: https://aistudio.google.com/app/apikey
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-2.0-flash"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+GEMINI_MODEL = "gemini-3.5-pro-preview-09-2026"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 # OpenAI (ChatGPT) — lấy tại: https://platform.openai.com/api-keys
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -31,7 +31,7 @@ os.makedirs(RESULT_FOLDER, exist_ok=True)
 # ==================================================
 def goi_gemini(prompt, he_thong=""):
     if not GEMINI_API_KEY:
-        return None, "⚠️ Chưa đặt GEMINI_API_KEY"
+        return None, "⚠️ Chưa đặt GEMINI_API_KEY trên Render"
     try:
         full_text = f"{he_thong}\n\nYêu cầu: {prompt}" if he_thong else prompt
         res = requests.post(
@@ -51,7 +51,7 @@ def goi_gemini(prompt, he_thong=""):
 
 def goi_gpt(prompt, he_thong=""):
     if not OPENAI_API_KEY:
-        return None, "⚠️ Chưa đặt OPENAI_API_KEY"
+        return None, "⚠️ Chưa đặt OPENAI_API_KEY trên Render"
     try:
         res = requests.post(
             OPENAI_URL,
@@ -78,14 +78,14 @@ def goi_gpt(prompt, he_thong=""):
 
 
 def goi_ai_tu_dong(prompt, he_thong=""):
-    """Tự động thử Gemini trước → nếu lỗi thì dùng GPT"""
+    """Thử Gemini 3.5 trước → lỗi thì tự động dùng GPT"""
     kq, loi = goi_gemini(prompt, he_thong)
     if kq:
-        return f"✅ [Gemini]\n{kq}"
-    kq, loi = goi_gpt(prompt, he_thong)
+        return f"✅ [Gemini 3.5]\n{kq}"
+    kq, loi_gpt = goi_gpt(prompt, he_thong)
     if kq:
         return f"✅ [GPT]\n{kq}"
-    return f"❌ Cả hai AI đều không trả lời:\n× Gemini: {loi}\n× GPT: {loi}"
+    return f"❌ Cả hai AI đều không trả lời:\n× Gemini: {loi}\n× GPT: {loi_gpt}"
 
 # ==================================================
 # TẠO FILE WORD & EXCEL
@@ -213,7 +213,7 @@ textarea:focus{border-color:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.1)}
 <body>
 <div class="container">
 <h1>⚡ All Thủy Điện — Hỗ trợ công việc</h1>
-<p class="desc">Gemini + GPT · Soạn thảo · Báo cáo · Đấu thầu · Xuất Word/Excel</p>
+<p class="desc">Gemini 3.5 + GPT · Soạn thảo · Báo cáo · Đấu thầu · Xuất Word/Excel</p>
 
 <div class="tabs">
 <button class="tab active" data-loai="chung">💬 Trò chuyện chung</button>
@@ -231,7 +231,7 @@ textarea:focus{border-color:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.1)}
 </div>
 
 <div class="chat" id="chatKhu">
-<div class="msg ai"><div class="bubble">👋 Xin chào! Tôi hỗ trợ bằng Gemini và GPT. Chọn chức năng hoặc nhập yêu cầu nhé!</div></div>
+<div class="msg ai"><div class="bubble">👋 Xin chào! Tôi hỗ trợ bằng Gemini 3.5 và GPT. Chọn chức năng hoặc nhập yêu cầu nhé!</div></div>
 </div>
 
 <div class="input-row">
