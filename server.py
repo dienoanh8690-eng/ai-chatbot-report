@@ -357,7 +357,7 @@ def download(ten_file):
 
 @app.route("/")
 def trang_chu():
-    return """
+    return '''
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -765,8 +765,4 @@ async function sendTender(){
     const d = await r.json(); addMsg('chat3','ai',d.reply);
     document.getElementById('btn3').disabled=false; document.getElementById('btn3').textContent='➤';
 }
-function quickTender(t){ document.getElementById('input3').value=t; sendTender(); }
-
-async function sendEquip(){
-    const i = document.getElementById('input4');
-    const m = i.value.trim(); if(!m && !file
+function quickTender(t){ document.getElementById('input3
