@@ -380,7 +380,7 @@ def trang_chu():
 --shadow-lg: 0 10px 30px rgba(37,99,235,0.08);
 --radius-sm: 8px; --radius-md: 12px; --radius-lg: 20px;
 }
-* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: "Inter", sans-serif; }
 body { background: linear-gradient(135deg, #f0f7ff 0%, #faf5ff 100%); min-height: 100vh; padding: 20px; }
 .header { text-align: center; margin-bottom: 28px; padding-top: 10px; }
 .header h1 { font-size: 26px; font-weight: 700; color: var(--gray-800); margin-bottom: 6px; }
@@ -666,103 +666,107 @@ let file1Content = "";
 let file4Content = "";
 let sheetContent = "";
 
-document.getElementById('fileInput1').addEventListener('change', e => {
+document.getElementById("fileInput1").addEventListener("change", e => {
     const f = e.target.files[0]; if (!f) return;
-    const fd = new FormData(); fd.append('file', f);
-    fetch('/api/upload', {method:'POST', body:fd}).then(r=>r.json()).then(d=>{
-        if(d.status==='ok'){
+    const fd = new FormData(); fd.append("file", f);
+    fetch("/api/upload", {method:"POST", body:fd}).then(r=>r.json()).then(d=>{
+        if(d.status==="ok"){
             file1Content = d.content;
-            document.getElementById('fName1').textContent = d.name;
-            document.getElementById('fileBar1').classList.remove('hidden');
+            document.getElementById("fName1").textContent = d.name;
+            document.getElementById("fileBar1").classList.remove("hidden");
         }
     });
 });
-document.getElementById('fileInput4').addEventListener('change', e => {
+document.getElementById("fileInput4").addEventListener("change", e => {
     const f = e.target.files[0]; if (!f) return;
-    const fd = new FormData(); fd.append('file', f);
-    fetch('/api/upload', {method:'POST', body:fd}).then(r=>r.json()).then(d=>{
-        if(d.status==='ok'){
+    const fd = new FormData(); fd.append("file", f);
+    fetch("/api/upload", {method:"POST", body:fd}).then(r=>r.json()).then(d=>{
+        if(d.status==="ok"){
             file4Content = d.content;
-            document.getElementById('fName4').textContent = d.name;
-            document.getElementById('fileBar4').classList.remove('hidden');
+            document.getElementById("fName4").textContent = d.name;
+            document.getElementById("fileBar4").classList.remove("hidden");
         }
     });
 });
-function clearFile1(){ file1Content=''; document.getElementById('fileBar1').classList.add('hidden'); document.getElementById('fileInput1').value=''; }
-function clearFile4(){ file4Content=''; document.getElementById('fileBar4').classList.add('hidden'); document.getElementById('fileInput4').value=''; }
-function clearSheet(){ sheetContent=''; document.getElementById('sheetBar').classList.add('hidden'); document.getElementById('sheetUrl').value=''; }
+function clearFile1(){ file1Content=""; document.getElementById("fileBar1").classList.add("hidden"); document.getElementById("fileInput1").value=""; }
+function clearFile4(){ file4Content=""; document.getElementById("fileBar4").classList.add("hidden"); document.getElementById("fileInput4").value=""; }
+function clearSheet(){ sheetContent=""; document.getElementById("sheetBar").classList.add("hidden"); document.getElementById("sheetUrl").value=""; }
 
 function connectSheet(){
-    const url = document.getElementById('sheetUrl').value.trim();
+    const url = document.getElementById("sheetUrl").value.trim();
     if(!url) return;
-    fetch('/api/connect-sheet', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url})})
+    fetch("/api/connect-sheet", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({url})})
     .then(r=>r.json()).then(d=>{
-        if(d.status==='ok'){
+        if(d.status==="ok"){
             sheetContent = d.content;
-            document.getElementById('sheetBar').classList.remove('hidden');
+            document.getElementById("sheetBar").classList.remove("hidden");
         } else alert(d.error);
     });
 }
 
-function handleKey(e, fn){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); fn(); } }
+function handleKey(e, fn){ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); fn(); } }
 function addMsg(chatId, type, text, links){
     const c = document.getElementById(chatId);
-    const d = document.createElement('div'); d.className = 'msg '+type;
-    let cls = '';
-    if(text.includes('⚠️')) cls=' warn';
-    else if(text.includes('❌')) cls=' err';
-    const safeText = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    d.innerHTML = '<div class="bubble'+cls+'">'+safeText+(links||'')+'</div>';
+    const d = document.createElement("div"); d.className = "msg "+type;
+    let cls = "";
+    if(text.includes("⚠️")) cls=" warn";
+    else if(text.includes("❌")) cls=" err";
+    const safeText = text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    d.innerHTML = '<div class="bubble'+cls+'">'+safeText+(links||"")+"</div>";
     c.appendChild(d); c.scrollTop = c.scrollHeight;
 }
 function dlLinks(d){
-    let h='';
+    let h="";
     if(d.word) h += '<a href="'+d.word+'" class="dl-btn dl-word" target="_blank">📄 Tải Word</a>';
     if(d.excel) h += '<a href="'+d.excel+'" class="dl-btn dl-excel" target="_blank">📊 Tải Excel</a>';
-    return h ? '<div class="dl-group">'+h+'</div>' : '';
+    return h ? '<div class="dl-group">'+h+"</div>" : "";
 }
 
 async function sendGen(){
-    const i = document.getElementById('input0');
+    const i = document.getElementById("input0");
     const m = i.value.trim(); if(!m) return;
-    addMsg('chat0','user',m); i.value='';
-    document.getElementById('btn0').disabled=true; document.getElementById('btn0').textContent='⏳';
-    const r = await fetch('/api/chat-general', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:m})});
-    const d = await r.json(); addMsg('chat0','ai',d.reply);
-    document.getElementById('btn0').disabled=false; document.getElementById('btn0').textContent='➤';
+    addMsg("chat0","user",m); i.value="";
+    document.getElementById("btn0").disabled=true; document.getElementById("btn0").textContent="⏳";
+    const r = await fetch("/api/chat-general", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:m})});
+    const d = await r.json(); addMsg("chat0","ai",d.reply);
+    document.getElementById("btn0").disabled=false; document.getElementById("btn0").textContent="➤";
 }
-function quickGen(t){ document.getElementById('input0').value=t; sendGen(); }
+function quickGen(t){ document.getElementById("input0").value=t; sendGen(); }
 
 async function sendData(){
-    const i = document.getElementById('input1');
+    const i = document.getElementById("input1");
     const m = i.value.trim(); if(!m && !file1Content && !sheetContent) return;
-    addMsg('chat1','user',m||'Phân tích dữ liệu'); i.value='';
-    document.getElementById('btn1').disabled=true; document.getElementById('btn1').textContent='⏳';
-    const r = await fetch('/api/chat-data', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:m, file_content:file1Content, sheet_content:sheetContent})});
+    addMsg("chat1","user",m||"Phân tích dữ liệu"); i.value="";
+    document.getElementById("btn1").disabled=true; document.getElementById("btn1").textContent="⏳";
+    const r = await fetch("/api/chat-data", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:m, file_content:file1Content, sheet_content:sheetContent})});
     const d = await r.json();
-    addMsg('chat1','ai',d.reply, dlLinks(d));
-    document.getElementById('btn1').disabled=false; document.getElementById('btn1').textContent='➤';
+    addMsg("chat1","ai",d.reply, dlLinks(d));
+    document.getElementById("btn1").disabled=false; document.getElementById("btn1").textContent="➤";
 }
-function quickData(t){ document.getElementById('input1').value=t; sendData(); }
+function quickData(t){ document.getElementById("input1").value=t; sendData(); }
 
 async function sendDoc(){
-    const i = document.getElementById('input2');
+    const i = document.getElementById("input2");
     const m = i.value.trim(); if(!m) return;
-    addMsg('chat2','user',m); i.value='';
-    document.getElementById('btn2').disabled=true; document.getElementById('btn2').textContent='⏳';
-    const r = await fetch('/api/chat-doc', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:m})});
-    const d = await r.json(); addMsg('chat2','ai',d.reply);
-    document.getElementById('btn2').disabled=false; document.getElementById('btn2').textContent='➤';
+    addMsg("chat2","user",m); i.value="";
+    document.getElementById("btn2").disabled=true; document.getElementById("btn2").textContent="⏳";
+    const r = await fetch("/api/chat-doc", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:m})});
+    const d = await r.json(); addMsg("chat2","ai",d.reply);
+    document.getElementById("btn2").disabled=false; document.getElementById("btn2").textContent="➤";
 }
-function quickDoc(t){ document.getElementById('input2').value=t; sendDoc(); }
+function quickDoc(t){ document.getElementById("input2").value=t; sendDoc(); }
 
 async function sendTender(){
-    const i = document.getElementById('input3');
+    const i = document.getElementById("input3");
     const m = i.value.trim(); if(!m) return;
-    addMsg('chat3','user',m); i.value='';
-    document.getElementById('btn3').disabled=true; document.getElementById('btn3').textContent='⏳';
-    const r = await fetch('/api/chat-tender', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:m})});
-    const d = await r.json(); addMsg('chat3','ai',d.reply);
-    document.getElementById('btn3').disabled=false; document.getElementById('btn3').textContent='➤';
+    addMsg("chat3","user",m); i.value="";
+    document.getElementById("btn3").disabled=true; document.getElementById("btn3").textContent="⏳";
+    const r = await fetch("/api/chat-tender", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:m})});
+    const d = await r.json(); addMsg("chat3","ai",d.reply);
+    document.getElementById("btn3").disabled=false; document.getElementById("btn3").textContent="➤";
 }
-function quickTender(t){ document.getElementById('input3
+function quickTender(t){ document.getElementById("input3").value=t; sendTender(); }
+
+async function sendEquip(){
+    const i = document.getElementById("input4");
+    const m = i.value.trim(); if(!m && !file4Content) return;
