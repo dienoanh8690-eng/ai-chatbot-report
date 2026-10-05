@@ -1,8 +1,10 @@
 import os
 import requests
+from flask import Flask
+
+app = Flask(__name__)
 
 # ===================== CẤU HÌNH KHÓA =====================
-# Điền khóa của bạn vào đây, hoặc để trống nếu chưa có
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 AI_API_KEY = os.environ.get("AI_API_KEY", "").strip()
@@ -10,7 +12,7 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "").strip()
 
 TIMEOUT = 15
-TEST_PROMPT = "Chào, trả lời ngắn gọn: tôi là AI nào?"
+TEST_PROMPT = "Chào, trả lời ngắn: tôi là AI nào?"
 # ==========================================================
 
 def kiem_tra_gemini():
@@ -24,10 +26,10 @@ def kiem_tra_gemini():
         }, timeout=TIMEOUT)
         if res.status_code == 200:
             txt = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            return ten, True, f"✅ OK → {txt[:50]}"
+            return ten, True, f"✅ HOẠT ĐỘNG → {txt[:60]}"
         return ten, False, f"❌ Lỗi {res.status_code}"
     except Exception as e:
-        return ten, False, f"❌ Lỗi: {str(e)[:40]}"
+        return ten, False, f"❌ Lỗi: {str(e)[:50]}"
 
 def kiem_tra_groq():
     ten = "🟢 Groq/Llama"
@@ -45,10 +47,10 @@ def kiem_tra_groq():
         }, timeout=TIMEOUT)
         if res.status_code == 200:
             txt = res.json()["choices"][0]["message"]["content"].strip()
-            return ten, True, f"✅ OK → {txt[:50]}"
+            return ten, True, f"✅ HOẠT ĐỘNG → {txt[:60]}"
         return ten, False, f"❌ Lỗi {res.status_code}"
     except Exception as e:
-        return ten, False, f"❌ Lỗi: {str(e)[:40]}"
+        return ten, False, f"❌ Lỗi: {str(e)[:50]}"
 
 def kiem_tra_aiml():
     ten = "🟣 AIML/DOLA"
@@ -66,10 +68,10 @@ def kiem_tra_aiml():
         }, timeout=TIMEOUT)
         if res.status_code == 200:
             txt = res.json()["choices"][0]["message"]["content"].strip()
-            return ten, True, f"✅ OK → {txt[:50]}"
+            return ten, True, f"✅ HOẠT ĐỘNG → {txt[:60]}"
         return ten, False, f"❌ Lỗi {res.status_code}"
     except Exception as e:
-        return ten, False, f"❌ Lỗi: {str(e)[:40]}"
+        return ten, False, f"❌ Lỗi: {str(e)[:50]}"
 
 def kiem_tra_openai():
     ten = "🔴 OpenAI/GPT"
@@ -87,10 +89,10 @@ def kiem_tra_openai():
         }, timeout=TIMEOUT)
         if res.status_code == 200:
             txt = res.json()["choices"][0]["message"]["content"].strip()
-            return ten, True, f"✅ OK → {txt[:50]}"
+            return ten, True, f"✅ HOẠT ĐỘNG → {txt[:60]}"
         return ten, False, f"❌ Lỗi {res.status_code}"
     except Exception as e:
-        return ten, False, f"❌ Lỗi: {str(e)[:40]}"
+        return ten, False, f"❌ Lỗi: {str(e)[:50]}"
 
 def kiem_tra_claude():
     ten = "🟠 Claude"
@@ -109,17 +111,13 @@ def kiem_tra_claude():
         }, timeout=TIMEOUT)
         if res.status_code == 200:
             txt = res.json()["content"][0]["text"].strip()
-            return ten, True, f"✅ OK → {txt[:50]}"
+            return ten, True, f"✅ HOẠT ĐỘNG → {txt[:60]}"
         return ten, False, f"❌ Lỗi {res.status_code}"
     except Exception as e:
-        return ten, False, f"❌ Lỗi: {str(e)[:40]}"
+        return ten, False, f"❌ Lỗi: {str(e)[:50]}"
 
-# ===================== CHẠY KIỂM TRA =====================
-if __name__ == "__main__":
-    print("=" * 60)
-    print("🔍 KIỂM TRA KẾT NỐI CÁC AI")
-    print("=" * 60)
-
+@app.route("/")
+def kiem_tra_tat_ca():
     ham_kiem_tra = [
         kiem_tra_gemini,
         kiem_tra_groq,
@@ -128,25 +126,45 @@ if __name__ == "__main__":
         kiem_tra_claude,
     ]
 
+    html = """
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Kiểm tra kết nối AI</title>
+        <style>
+            body { font-family: Arial; padding: 30px; max-width: 800px; margin: 0 auto; background: #f5f7fa; }
+            h1 { color: #1e40af; text-align: center; }
+            .item { padding: 15px; margin: 10px 0; border-radius: 10px; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+            .ok { border-left: 5px solid #22c55e; }
+            .fail { border-left: 5px solid #ef4444; }
+            .stats { margin-top: 20px; padding: 15px; background: #e0e7ff; border-radius: 10px; font-weight: bold; }
+            .note { margin-top: 30px; padding: 15px; background: #fef3c7; border-radius: 10px; }
+        </style>
+    </head>
+    <body>
+        <h1>🔍 KIỂM TRA KẾT NỐI CÁC AI</h1>
+    """
+
     tong = 0
     dung = 0
-    ket_qua = []
-
     for ham in ham_kiem_tra:
         ten, ok, msg = ham()
         tong += 1
-        if ok:
-            dung += 1
-        ket_qua.append((ten, ok, msg))
-        print(f"{ten:15} | {msg}")
+        if ok: dung += 1
+        status_class = "ok" if ok else "fail"
+        html += f'<div class="item {status_class}"><strong>{ten}</strong><br>{msg}</div>'
 
-    print("=" * 60)
-    print(f"Kết quả: {dung}/{tong} AI hoạt động")
-    print("=" * 60)
+    html += f"""
+        <div class="stats">
+            Tổng số: {tong} AI | Hoạt động: {dung} | Lỗi: {tong - dung}
+        </div>
+        <div class="note">
+            💡 <strong>Bước tiếp theo:</strong> Copy toàn bộ nội dung trang này gửi mình → mình sẽ viết code chính chỉ dùng AI đã chạy được!
+        </div>
+    </body>
+    </html>
+    """
+    return html
 
-    if dung == 0:
-        print("\n💡 Hướng dẫn: Điền khóa vào biến tương ứng ở đầu file")
-        print("   hoặc đặt trên Render → Environment")
-    else:
-        print(f"\n✅ Có {dung} AI hoạt động — mình sẽ xây code chính dựa trên các AI này!")
-        print("   Các AI chạy được:", ", ".join([ten for ten, ok, _ in ket_qua if ok]))
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
