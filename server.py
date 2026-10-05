@@ -475,7 +475,6 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 <div class="grid">
 
-<!-- Cột 1: Trò chuyện chung -->
 <div class="card card-gen">
 <div class="card-head">
 <span class="card-icon">💬</span>
@@ -497,7 +496,6 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 </div>
 
-<!-- Cột 2: Xử lý dữ liệu & Tạo báo cáo -->
 <div class="card card-p1">
 <div class="card-head">
 <span class="card-icon">📊</span>
@@ -535,7 +533,6 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 </div>
 
-<!-- Cột 3: Soạn thảo văn bản -->
 <div class="card card-p2">
 <div class="card-head">
 <span class="card-icon">✍️</span>
@@ -557,7 +554,6 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 </div>
 
-<!-- Cột 4: Quy trình đấu thầu -->
 <div class="card card-p3">
 <div class="card-head">
 <span class="card-icon">🏆</span>
@@ -579,7 +575,6 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 </div>
 
-<!-- Cột 5: Quản lý thiết bị -->
 <div class="card card-p4">
 <div class="card-head">
 <span class="card-icon">🔧</span>
@@ -609,7 +604,6 @@ textarea:focus { border-color: var(--gen); box-shadow: 0 0 0 3px rgba(99,102,241
 </div>
 </div>
 
-<!-- Cột 6: Thông tin liên hệ -->
 <div class="card card-p5">
 <div class="card-head">
 <span class="card-icon">📌</span>
@@ -771,4 +765,4 @@ async function sendEquip(){
     const m = i.value.trim(); if(!m && !file4Content) return;
     addMsg("chat4","user",m||"Phân tích thiết bị"); i.value="";
     document.getElementById("btn4").disabled=true; document.getElementById("btn4").textContent="⏳";
-   
+    const r = await fetch("/api/chat-equip", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:m, file_content:file
