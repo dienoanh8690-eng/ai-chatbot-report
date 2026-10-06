@@ -1,6 +1,6 @@
 flask
 flask-cors
+requests
 python-docx
 openpyxl
-requests
 gunicorn
