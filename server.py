@@ -1,10 +1,12 @@
+import hmac
 import os
 import re
+import time
 import uuid
 from datetime import datetime
 
 import requests
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
 from docx import Document
 from openpyxl import Workbook, load_workbook
@@ -29,7 +31,12 @@ OPENAI_API_KEY = env("OPENAI_API_KEY")
 OPENAI_MODEL = env("OPENAI_MODEL", "gpt-4o-mini")
 CLAUDE_API_KEY = env("CLAUDE") or env("ANTHROPIC_API_KEY")
 CLAUDE_MODEL = env("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
-APP_PASSWORD = env("APP_PASSWORD")                  # tuỳ chọn: mã truy cập chung
+ADMIN_USER = env("ADMIN_USER")                      # tên đăng nhập (đặt trên Render)
+ADMIN_PASS = env("ADMIN_PASS")                      # mật khẩu (đặt trên Render)
+SECRET_KEY = env("SECRET_KEY") or os.urandom(24).hex()
+app.secret_key = SECRET_KEY
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                  SESSION_COOKIE_SECURE=bool(os.environ.get("RENDER")), PERMANENT_SESSION_LIFETIME=12 * 3600)
 
 TIMEOUT = 20
 UPLOAD_FOLDER = "tai_lieu_tai_len"
@@ -248,13 +255,57 @@ def doc_google_sheet(sheet_url):
 
 
 # ==================================================
-# BẢO VỆ BẰNG MÃ TRUY CẬP (nếu đặt APP_PASSWORD)
+# ĐĂNG NHẬP (tài khoản lấy từ biến môi trường ADMIN_USER / ADMIN_PASS)
 # ==================================================
+THU_SAI = {}  # ip -> (số lần sai, thời điểm hết khóa)
+
+
+def _ip():
+    return (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
+
+
 @app.before_request
-def kiem_tra_ma():
-    if APP_PASSWORD and request.path.startswith("/api/"):
-        if request.headers.get("X-Access-Code", "") != APP_PASSWORD:
-            return jsonify({"error": "Cần mã truy cập", "reply": "❌ Sai hoặc thiếu mã truy cập."}), 401
+def bat_dang_nhap():
+    p = request.path
+    if p in ("/api/login", "/api/logout", "/api/me"):
+        return
+    if (p.startswith("/api/") or p.startswith("/download/")) and not session.get("user"):
+        return jsonify({"error": "Cần đăng nhập", "reply": "❌ Vui lòng đăng nhập."}), 401
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    ip = _ip()
+    so, khoa = THU_SAI.get(ip, (0, 0))
+    if khoa > time.time():
+        return jsonify({"error": "Sai quá nhiều lần, vui lòng thử lại sau vài phút."}), 429
+    if not ADMIN_USER or not ADMIN_PASS:
+        return jsonify({"error": "Chưa cấu hình ADMIN_USER / ADMIN_PASS trên máy chủ."}), 500
+    d = request.get_json(silent=True) or {}
+    u = str(d.get("username", "")).strip().lower().encode()
+    pw = str(d.get("password", "")).encode()
+    ok_u = hmac.compare_digest(u, ADMIN_USER.lower().encode())
+    ok_p = hmac.compare_digest(pw, ADMIN_PASS.encode())
+    if ok_u and ok_p:
+        THU_SAI.pop(ip, None)
+        session.clear()
+        session["user"] = ADMIN_USER
+        session.permanent = True
+        return jsonify({"status": "ok"})
+    so += 1
+    THU_SAI[ip] = (0, time.time() + 300) if so >= 5 else (so, 0)
+    return jsonify({"error": "Sai tên đăng nhập hoặc mật khẩu."}), 401
+
+
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/me")
+def me():
+    return jsonify({"logged_in": bool(session.get("user"))})
 
 
 # ==================================================
@@ -397,10 +448,29 @@ textarea:focus{border-color:var(--c)}
 .contact-row:last-child{border-bottom:none}
 .contact-label{font-weight:600;color:var(--c);min-width:90px;flex-shrink:0}
 .contact-row a{color:var(--c);text-decoration:none}
+#login{position:fixed;inset:0;background:linear-gradient(135deg,#f0f7ff,#faf5ff);display:flex;align-items:center;justify-content:center;z-index:99;padding:20px}
+.login-box{background:#fff;border-radius:20px;padding:32px;width:100%;max-width:380px;box-shadow:0 10px 30px rgba(37,99,235,.12);text-align:center}
+.login-box h2{color:var(--g800);margin-bottom:6px;font-size:22px}
+.login-box p{color:var(--g600);font-size:13px;margin-bottom:20px}
+.login-box input{width:100%;padding:12px 16px;border:1px solid var(--g200);border-radius:10px;font-size:14px;margin-bottom:12px;outline:none}
+.login-box input:focus{border-color:#2563eb}
+.login-box button{width:100%;padding:12px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-weight:600;font-size:15px;cursor:pointer}
+.login-box button:disabled{opacity:.6}
+#loginErr{color:#b91c1c;font-size:13px;min-height:18px;margin-bottom:10px}
+.header{position:relative}
+.logout{position:absolute;right:0;top:0;padding:8px 16px;border:1px solid var(--g200);border-radius:20px;background:#fff;cursor:pointer;font-size:13px}
 </style>
 </head>
 <body>
+<div id="login"><div class="login-box">
+<h2>⚡ All Thủy Điện</h2><p>Vui lòng đăng nhập để sử dụng hệ thống</p>
+<input type="text" id="lu" placeholder="Tên đăng nhập" autocomplete="username">
+<input type="password" id="lp" placeholder="Mật khẩu" autocomplete="current-password">
+<div id="loginErr"></div>
+<button id="lb">Đăng nhập</button>
+</div></div>
 <div class="header">
+<button class="logout hidden" id="logoutBtn">🚪 Đăng xuất</button>
 <h1>⚡ All Thủy Điện — Hệ thống hỗ trợ toàn diện</h1>
 <p>Trò chuyện chung · Phân tích dữ liệu · Soạn thảo văn bản · Tư vấn đấu thầu · Quản lý thiết bị · Thông tin liên hệ</p>
 </div>
@@ -441,7 +511,6 @@ const CARDS = [
   quick:[["📊 Phân loại thiết bị","Phân loại thiết bị theo nhóm"],["🛠️ Kế hoạch bảo trì","Đề xuất kế hoạch bảo trì định kỳ"],["⚠️ Đánh giá rủi ro","Đánh giá tình trạng và rủi ro"],["🔄 Tuổi thọ & Thay thế","Tính tuổi thọ và đề xuất thay thế"]]}
 ];
 
-let CODE = sessionStorage.getItem("code") || "";
 const $ = id => document.getElementById(id);
 const ST = {};
 
@@ -468,14 +537,8 @@ function addMsg(id, type, text, d){
 }
 
 async function call(path, opts){
-  opts.headers = Object.assign({"X-Access-Code": CODE}, opts.headers || {});
   const r = await fetch(path, opts);
-  if(r.status === 401){
-    const nhap = prompt("Nhập mã truy cập:");
-    if(!nhap) throw new Error("Cần mã truy cập");
-    CODE = nhap; sessionStorage.setItem("code", CODE);
-    return call(path, opts);
-  }
+  if(r.status === 401){ showLogin(); throw new Error("login"); }
   return r.json();
 }
 
@@ -490,7 +553,7 @@ async function send(c, preset){
       body: JSON.stringify({message:m, file_content:s.file, sheet_content:s.sheet})});
     addMsg(c.id, "ai", d.reply || "❌ Không có phản hồi", d);
   }catch(e){
-    addMsg(c.id, "ai", "❌ Không kết nối được máy chủ (máy chủ miễn phí có thể đang khởi động, hãy thử lại sau ~1 phút).");
+    addMsg(c.id, "ai", e.message === "login" ? "❌ Phiên đăng nhập đã hết, vui lòng đăng nhập lại." : "❌ Không kết nối được máy chủ (máy chủ miễn phí có thể đang khởi động, hãy thử lại sau ~1 phút).");
   }finally{
     btn.disabled = false; btn.textContent = "➤";
   }
@@ -505,7 +568,7 @@ async function upload(c, f){
       $("fb-"+c.id).firstChild.textContent = "📎 "+d.name;
       $("fb-"+c.id).classList.remove("hidden");
     } else alert(d.error || "Không tải được tệp");
-  }catch(e){ alert("Không tải được tệp: "+e.message); }
+  }catch(e){ if(e.message !== "login") alert("Không tải được tệp: "+e.message); }
 }
 
 function wire(c){
@@ -528,7 +591,7 @@ function wire(c){
         const d = await call("/api/connect-sheet", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({url})});
         if(d.status === "ok"){ ST[c.id].sheet = d.content; $("sh-"+c.id).classList.remove("hidden"); }
         else alert(d.error || "Không kết nối được Sheet");
-      }catch(e){ alert("Lỗi: "+e.message); }
+      }catch(e){ if(e.message !== "login") alert("Lỗi: "+e.message); }
     };
     $("sh-"+c.id).querySelector("button").onclick = () => { ST[c.id].sheet=""; $("su-"+c.id).value=""; $("sh-"+c.id).classList.add("hidden"); };
   }
@@ -542,6 +605,24 @@ CARDS.forEach(c => {
   grid.insertBefore(el, contact);
   wire(c); addMsg(c.id, "ai", c.hello);
 });
+
+function showLogin(){ $("login").classList.remove("hidden"); $("logoutBtn").classList.add("hidden"); $("lu").focus(); }
+function showApp(){ $("login").classList.add("hidden"); $("logoutBtn").classList.remove("hidden"); }
+async function doLogin(){
+  const b = $("lb"); b.disabled = true; $("loginErr").textContent = "";
+  try{
+    const r = await fetch("/api/login", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({username:$("lu").value, password:$("lp").value})});
+    const d = await r.json();
+    if(r.ok){ $("lp").value = ""; showApp(); } else $("loginErr").textContent = d.error || "Đăng nhập thất bại";
+  }catch(e){ $("loginErr").textContent = "Không kết nối được máy chủ, thử lại sau ~1 phút."; }
+  b.disabled = false;
+}
+$("lb").onclick = doLogin;
+$("lp").addEventListener("keydown", e => { if(e.key === "Enter") doLogin(); });
+$("lu").addEventListener("keydown", e => { if(e.key === "Enter") $("lp").focus(); });
+$("logoutBtn").onclick = async () => { await fetch("/api/logout", {method:"POST"}); showLogin(); };
+fetch("/api/me").then(r => r.json()).then(d => d.logged_in ? showApp() : showLogin()).catch(showLogin);
 </script>
 </body>
 </html>
