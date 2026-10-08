@@ -1,4 +1,3 @@
-import hmac
 import os
 import re
 import uuid
@@ -9,19 +8,18 @@ from flask_cors import CORS
 from docx import Document
 from openpyxl import Workbook
 
-# === Khởi tạo ứng dụng ===
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10MB
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 CORS(app)
 
 # ==================================================
-# CẤU HÌNH BIẾN MÔI TRƯỜNG — đặt trên Render
+# CẤU HÌNH — ĐÃ ĐẶT SẴN THÔNG TIN CỦA BẠN
 # ==================================================
 def env(name, default=""):
     val = os.environ.get(name, default)
     return val.strip() if isinstance(val, str) else val
 
-# --- API Keys ---
+# === API Keys ===
 GEMINI_API_KEY = env("GEMINI_API_KEY")
 GEMINI_MODEL = env("GEMINI_MODEL", "gemini-2.0-flash")
 
@@ -31,9 +29,9 @@ GROQ_MODEL = env("GROQ_MODEL", "llama-3.3-70b-versatile")
 OPENROUTER_API_KEY = env("OPENROUTER") or env("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = env("OPENROUTER_MODEL", "openrouter/auto")
 
-# --- Đăng nhập ---
-ADMIN_USER = env("ADMIN_USER")
-ADMIN_PASS = env("ADMIN_PASS")
+# === Đăng nhập — ĐÃ KHỚP THÔNG TIN BẠN CUNG CẤP ===
+ADMIN_USER = env("ADMIN_USER", "chotvjp").strip()
+ADMIN_PASS = env("ADMIN_PASS", "Do@058690").strip()
 SECRET_KEY = env("SECRET_KEY") or os.urandom(32).hex()
 
 app.secret_key = SECRET_KEY
@@ -44,7 +42,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=12 * 3600
 )
 
-TIMEOUT = 120  # Khớp --timeout 120 trong lệnh gunicorn
+TIMEOUT = 120
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "outputs"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -53,7 +51,7 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 DEFAULT_SYSTEM_PROMPT = "Trả lời bằng tiếng Việt rõ ràng, chính xác, dễ hiểu, phù hợp lĩnh vực thủy điện."
 
 # ==================================================
-# HÀM GỌI NGUỒN AI
+# HÀM GỌI AI
 # ==================================================
 def call_openai_style(api_url, api_key, model, messages, max_tokens=2048):
     if not api_key:
@@ -61,16 +59,8 @@ def call_openai_style(api_url, api_key, model, messages, max_tokens=2048):
     try:
         resp = requests.post(
             api_url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": model,
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": 0.7
-            },
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.7},
             timeout=TIMEOUT
         )
         resp.raise_for_status()
@@ -109,7 +99,6 @@ def call_openrouter(messages):
         OPENROUTER_API_KEY, OPENROUTER_MODEL, messages
     )
 
-# === Thử lần lượt cho đến khi thành công ===
 def chat_with_fallback(user_prompt, system_prompt=DEFAULT_SYSTEM_PROMPT):
     messages = [
         {"role": "system", "content": system_prompt},
@@ -127,7 +116,7 @@ def chat_with_fallback(user_prompt, system_prompt=DEFAULT_SYSTEM_PROMPT):
     return "❌ Tất cả AI đều không trả lời — kiểm tra lại API key", ""
 
 # ==================================================
-# XUẤT FILE WORD / EXCEL
+# XUẤT FILE
 # ==================================================
 def clean_text(text):
     return re.sub(r"[*_`#]", "", text)
@@ -168,7 +157,7 @@ def export_excel(content):
         return None
 
 # ==================================================
-# BẢO MẬT / ĐĂNG NHẬP
+# ĐĂNG NHẬP
 # ==================================================
 @app.before_request
 def check_auth():
@@ -183,6 +172,9 @@ def login():
     data = request.get_json(silent=True) or {}
     u = data.get("username", "").strip()
     p = data.get("password", "").strip()
+    # In ra log để kiểm tra
+    print(f"Đăng nhập thử: user={u!r}, pass={p!r}", flush=True)
+    print(f"Đúng: user={ADMIN_USER!r}, pass={ADMIN_PASS!r}", flush=True)
     if u == ADMIN_USER and p == ADMIN_PASS:
         session["authenticated"] = True
         return jsonify({"ok": True})
@@ -198,7 +190,7 @@ def healthz():
     return "OK"
 
 # ==================================================
-# API CHÍNH
+# API
 # ==================================================
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
@@ -219,7 +211,7 @@ def api_export():
         return jsonify({"error": "Không có nội dung để xuất"}), 400
     fname = export_word(content) if kind == "word" else export_excel(content)
     if not fname:
-        return jsonify({"error": "Lỗi tạo file, xem log chi tiết"}), 500
+        return jsonify({"error": "Lỗi tạo file"}), 500
     return jsonify({"url": f"/download/{fname}"})
 
 @app.route("/download/<filename>")
@@ -227,7 +219,7 @@ def download_file(filename):
     return send_from_directory(OUTPUT_FOLDER, filename, as_attachment=True)
 
 # ==================================================
-# GIAO DIỆN WEB
+# GIAO DIỆN
 # ==================================================
 @app.route("/")
 def index():
@@ -239,14 +231,13 @@ def index():
 <title>All Thủy Điện — Hệ thống hỗ trợ</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:Segoe UI,Roboto,sans-serif}
-:root{--p:#2563eb;--s:#16a34a;--g:#f59e0b;--r:#ef4444;--l:#f8fafc;--d:#1e293b}
+:root{--p:#2563eb;--s:#16a34a;--g:#f59e0b;--d:#1e293b}
 body{background:linear-gradient(135deg,#eff6ff,#f0fdf4);min-height:100vh;padding:20px}
 .header{text-align:center;margin-bottom:24px}
 .header h1{color:var(--p);font-size:24px;margin-bottom:4px}
-.header p{color:#64748b;font-size:14px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:20px;max-width:1400px;margin:0 auto}
 .card{background:#fff;border-radius:16px;padding:20px;box-shadow:0 4px 12px rgba(0,0,0,.06);display:flex;flex-direction:column;height:680px}
-.card h2{font-size:16px;color:var(--p);margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e2e8f0;display:flex;align-items:center;gap:8px}
+.card h2{font-size:16px;color:var(--p);margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e2e8f0}
 .chat-box{flex:1;overflow-y:auto;padding:12px;background:#f8fafc;border-radius:12px;margin-bottom:12px}
 .msg{margin-bottom:12px;max-width:90%}
 .msg.user{margin-left:auto}
@@ -254,22 +245,19 @@ body{background:linear-gradient(135deg,#eff6ff,#f0fdf4);min-height:100vh;padding
 .msg-bubble{padding:12px 16px;border-radius:16px;line-height:1.5;font-size:14px}
 .msg.user .msg-bubble{background:var(--p);color:#fff;border-bottom-right-radius:4px}
 .msg.ai .msg-bubble{background:#e2e8f0;color:var(--d);border-bottom-left-radius:4px}
-.input-row{display:flex;gap:8px;margin-bottom:8px}
+.input-row{display:flex;gap:8px}
 textarea{flex:1;padding:12px 16px;border:1px solid #e2e8f0;border-radius:12px;font-size:14px;outline:none;resize:none;height:60px}
 textarea:focus{border-color:var(--p)}
-button{padding:12px 20px;border:none;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;transition:.2s}
+button{padding:12px 20px;border:none;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer}
 .btn-primary{background:var(--p);color:#fff}
-.btn-primary:hover{background:#1d4ed8}
 .btn-success{background:var(--s);color:#fff}
 .btn-warning{background:var(--g);color:#fff}
-.contact{font-size:13px;line-height:1.8;color:#475569}
-.contact p{margin:4px 0}
 .login-wrap{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:999}
-.login-box{background:#fff;padding:32px;border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:90%;max-width:400px}
-.login-box h2{text-align:center;color:var(--p);margin-bottom:20px}
-.login-box input{margin-bottom:12px;width:100%;padding:12px 16px;border:1px solid #e2e8f0;border-radius:12px;font-size:14px}
-.login-box input:focus{border-color:var(--p);outline:none}
+.login-box{background:#fff;padding:32px;border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:90%;max-width:400px;text-align:center}
+.login-box h2{color:var(--p);margin-bottom:20px}
+.login-box input{width:100%;padding:12px 16px;border:1px solid #e2e8f0;border-radius:12px;font-size:14px;margin-bottom:12px}
 .hidden{display:none!important}
+.contact{font-size:13px;line-height:1.8;color:#475569}
 </style>
 </head>
 <body>
@@ -277,7 +265,7 @@ button{padding:12px 20px;border:none;border-radius:12px;font-size:14px;font-weig
 <div id="loginScreen" class="login-wrap">
   <div class="login-box">
     <h2>🔐 Đăng nhập</h2>
-    <input type="text" id="user" placeholder="Tên đăng nhập">
+    <input type="text" id="user" placeholder="Tên đăng nhập" value="chotvjp">
     <input type="password" id="pass" placeholder="Mật khẩu" onkeydown="event.key==='Enter'&&doLogin()">
     <button class="btn-primary" style="width:100%;margin-top:8px" onclick="doLogin()">Đăng nhập</button>
     <p id="loginErr" style="color:red;margin-top:10px;display:none">Sai thông tin đăng nhập</p>
@@ -291,7 +279,6 @@ button{padding:12px 20px;border:none;border-radius:12px;font-size:14px;font-weig
   </div>
 
   <div class="grid">
-    <!-- Cột 1: Soạn thảo văn bản -->
     <div class="card">
       <h2>✍️ Soạn thảo văn bản</h2>
       <div class="chat-box" id="chat1"></div>
@@ -303,11 +290,10 @@ button{padding:12px 20px;border:none;border-radius:12px;font-size:14px;font-weig
       </div>
     </div>
 
-    <!-- Cột 2: Quy trình & Báo cáo -->
     <div class="card">
       <h2>📊 Quy trình & Báo cáo</h2>
       <div class="chat-box" id="chat2"></div>
-      <textarea id="input2" placeholder="Nhập yêu cầu phân tích, tạo báo cáo..."></textarea>
+      <textarea id="input2" placeholder="Nhập yêu cầu phân tích..."></textarea>
       <div class="input-row">
         <button class="btn-primary" onclick="sendMsg(2)">Gửi</button>
         <button class="btn-success" onclick="exportFile(2,'word')">Tải Word</button>
@@ -315,7 +301,6 @@ button{padding:12px 20px;border:none;border-radius:12px;font-size:14px;font-weig
       </div>
     </div>
 
-    <!-- Cột 3: Thông tin liên hệ -->
     <div class="card">
       <h2>📌 Thông tin liên hệ</h2>
       <div class="contact" style="flex:1">
@@ -327,7 +312,7 @@ button{padding:12px 20px;border:none;border-radius:12px;font-size:14px;font-weig
         <p><strong>Địa chỉ:</strong> TK5 - Mường La - Sơn La</p>
         <p><strong>Website:</strong> namchien.vn</p>
         <hr style="margin:16px 0;border:none;border-top:1px solid #e2e8f0">
-        <p style="color:#64748b;font-size:12px">AI tự động chuyển đổi: Gemini, Groq, OpenRouter<br>© 2026 — All Thủy Điện</p>
+        <p style="color:#64748b;font-size:12px">© 2026 — All Thủy Điện</p>
       </div>
       <button class="btn-primary" style="margin-top:8px" onclick="doLogout()">Đăng xuất</button>
     </div>
@@ -377,8 +362,8 @@ async function sendMsg(col){
   addMsg(col,"ai","⏳ Đang xử lý...");
   
   const sys = col===1 
-    ? "Bạn là trợ lý soạn thảo văn bản chính thức, chuẩn mực tiếng Việt, ngôn ngữ trang trọng rõ ràng."
-    : "Bạn là chuyên gia thủy điện, phân tích dữ liệu, lập quy trình, báo cáo kỹ thuật chi tiết, chính xác.";
+    ? "Bạn là trợ lý soạn thảo văn bản chính thức, chuẩn mực tiếng Việt."
+    : "Bạn là chuyên gia thủy điện, phân tích dữ liệu, lập quy trình, báo cáo kỹ thuật.";
   
   const res = await fetch("/api/chat", {
     method:"POST",
@@ -411,7 +396,6 @@ async function exportFile(col,type){
 </html>
 '''
 
-# === Gunicorn sẽ dùng biến 'app' này — KHÔNG ĐỔI TÊN ===
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
