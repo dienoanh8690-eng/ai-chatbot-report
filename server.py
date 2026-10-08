@@ -24,9 +24,17 @@ def env(name, default=""):
 AI_API_KEY = env("AI_API_KEY")                      # AIML API
 AI_MODEL = env("AI_MODEL", "bytedance/dola-seed-2-0-pro")
 GEMINI_API_KEY = env("GEMINI_API_KEY")
-GEMINI_MODEL = env("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = env("GEMINI_MODEL", "gemini-3.8-flash")
 GROQ_API_KEY = env("GROQ_API_KEY")
-GROQ_MODEL = env("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = env("GROQ_MODEL", "llama-3.3-70b-versatile")
+OPENROUTER_API_KEY = env("OPEN_ROUTER") or env("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", "openrouter/free")  # tự chọn model miễn phí đang chạy
+SAMBANOVA_API_KEY = env("SAMBANOVA")
+SAMBANOVA_MODEL = env("SAMBANOVA_MODEL", "Meta-Llama-3.3-70B-Instruct")
+HF_TOKEN = env("HUGGINGFACE_TOKEN")
+HF_MODEL = env("HF_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
+COHERE_API_KEY = env("COHERE").split("sk-ant")[0].strip()  # phòng khi dán nhầm khóa khác vào cuối
+COHERE_MODEL = env("COHERE_MODEL", "command-a-03-2025")
 OPENAI_API_KEY = env("OPENAI_API_KEY")
 OPENAI_MODEL = env("OPENAI_MODEL", "gpt-4o-mini")
 CLAUDE_API_KEY = env("CLAUDE") or env("ANTHROPIC_API_KEY")
@@ -49,15 +57,196 @@ MAC_DINH = "Trả lời bằng tiếng Việt rõ ràng, tự nhiên."
 # ==================================================
 # GỌI TỪNG AI — mỗi hàm trả về (tên, nội dung, lỗi)
 # ==================================================
-def _openai_style(ten, url, key, model, prompt, he_thong):
-    if not key:
+MODEL_CACHE = {}  # tên AI -> model tự tìm được khi tên model cấu hình bị sai/đã đổi
+LOAI_TRU = ("whisper", "guard", "tts", "embed", "vision", "image", "audio", "moderation",
+            "safeguard", "orpheus", "playai", "rerank", "speech", "transcri", "distil")
+UU_TIEN = ("llama-3.3-70b", "gpt-oss-120b", "gpt-oss-20b", "llama-3.1-70b", "qwen3", "qwen",
+           "llama", "gemma", "mistral", "deepseek")
+
+
+def _tach_khoa(chuoi):
+    """Cho phép đặt nhiều khóa trong một biến, ngăn cách bằng dấu phẩy."""
+    return [k for k in re.split(r"[,;\s]+", chuoi or "") if k]
+
+
+def _tim_model_openai(base, key):
+    """Hỏi danh sách model của nhà cung cấp và chọn một model phù hợp."""
+    try:
+        r = requests.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"}, timeout=10)
+        if r.status_code != 200:
+            return None
+        ids = [m.get("id", "") for m in r.json().get("data", [])]
+        ids = [i for i in ids if i and not any(x in i.lower() for x in LOAI_TRU)]
+        for kw in UU_TIEN:
+            for i in ids:
+                if kw in i.lower():
+                    return i
+        return ids[0] if ids else None
+    except Exception:
+        return None
+
+
+def _tim_model_gemini(key):
+    try:
+        r = requests.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+                         headers={"x-goog-api-key": key}, timeout=10)
+        if r.status_code != 200:
+            return None
+        ds = []
+        for m in r.json().get("models", []):
+            ten = m.get("name", "").replace("models/", "")
+            low = ten.lower()
+            if "generateContent" not in m.get("supportedGenerationMethods", []):
+                continue
+            if "flash" not in low or any(x in low for x in (
+                    "lite", "image", "tts", "live", "audio", "exp", "thinking", "preview",
+                    "embedding", "robotics", "computer")):
+                continue
+            ver = tuple(int(x) for x in re.findall(r"\d+", low.split("flash")[0]))
+            ds.append((ver, ten))
+        ds.sort(reverse=True)
+        return ds[0][1] if ds else None
+    except Exception:
+        return None
+
+
+def _openai_style(ten, url, key, model, prompt, he_thong, timeout=TIMEOUT, base=None):
+    khoa = _tach_khoa(key)
+    if not khoa:
+        return ten, None, "chưa đặt khóa API"
+    loi = "lỗi không rõ"
+    for k in khoa:
+        mdl = MODEL_CACHE.get(ten, model)
+        for lan in (1, 2):
+            try:
+                res = requests.post(
+                    url,
+                    headers={"Authorization": f"Bearer {k}", "Content-Type": "application/json"},
+                    json={
+                        "model": mdl,
+                        "messages": [
+                            {"role": "system", "content": he_thong or MAC_DINH},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": 0.7,
+                        "max_tokens": 2048,
+                    },
+                    timeout=timeout,
+                )
+            except Exception as e:
+                print(f"[{ten}] Exception: {e}", flush=True)
+                loi = f"lỗi kết nối ({type(e).__name__})"
+                break
+            if res.status_code == 200:
+                try:
+                    text = res.json()["choices"][0]["message"]["content"]
+                except Exception:
+                    text = ""
+                if text and text.strip():
+                    return ten, text, None
+                loi = "phản hồi rỗng"
+                break
+            print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
+            loi = f"HTTP {res.status_code}"
+            if lan == 1 and base and res.status_code in (400, 404):
+                moi = _tim_model_openai(base, k)
+                if moi and moi != mdl:
+                    print(f"[{ten}] đổi sang model: {moi}", flush=True)
+                    MODEL_CACHE[ten] = mdl = moi
+                    continue
+            break
+    return ten, None, loi
+
+
+def goi_openrouter(prompt, he_thong=""):
+    return _openai_style("OpenRouter", "https://openrouter.ai/api/v1/chat/completions",
+                         OPENROUTER_API_KEY, OPENROUTER_MODEL, prompt, he_thong, timeout=35)
+
+
+def goi_groq(prompt, he_thong=""):
+    return _openai_style("Llama/Groq", "https://api.groq.com/openai/v1/chat/completions",
+                         GROQ_API_KEY, GROQ_MODEL, prompt, he_thong,
+                         base="https://api.groq.com/openai/v1")
+
+
+def goi_sambanova(prompt, he_thong=""):
+    return _openai_style("SambaNova", "https://api.sambanova.ai/v1/chat/completions",
+                         SAMBANOVA_API_KEY, SAMBANOVA_MODEL, prompt, he_thong,
+                         base="https://api.sambanova.ai/v1")
+
+
+def goi_huggingface(prompt, he_thong=""):
+    return _openai_style("HuggingFace", "https://router.huggingface.co/v1/chat/completions",
+                         HF_TOKEN, HF_MODEL, prompt, he_thong, timeout=30,
+                         base="https://router.huggingface.co/v1")
+
+
+def goi_aiml(prompt, he_thong=""):
+    return _openai_style("DOLA/AIML", "https://api.aimlapi.com/v1/chat/completions",
+                         AI_API_KEY, AI_MODEL, prompt, he_thong)
+
+
+def goi_gpt(prompt, he_thong=""):
+    return _openai_style("GPT", "https://api.openai.com/v1/chat/completions",
+                         OPENAI_API_KEY, OPENAI_MODEL, prompt, he_thong)
+
+
+def goi_gemini(prompt, he_thong=""):
+    ten = "Gemini"
+    khoa = _tach_khoa(GEMINI_API_KEY)
+    if not khoa:
+        return ten, None, "chưa đặt khóa API"
+    loi = "lỗi không rõ"
+    for k in khoa:
+        mdl = MODEL_CACHE.get(ten, GEMINI_MODEL)
+        for lan in (1, 2):
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{mdl}:generateContent"
+            try:
+                res = requests.post(
+                    url,
+                    headers={"x-goog-api-key": k, "Content-Type": "application/json"},
+                    json={
+                        "systemInstruction": {"parts": [{"text": he_thong or MAC_DINH}]},
+                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2048},
+                    },
+                    timeout=TIMEOUT,
+                )
+            except Exception as e:
+                print(f"[{ten}] Exception: {e}", flush=True)
+                loi = f"lỗi kết nối ({type(e).__name__})"
+                break
+            if res.status_code == 200:
+                cands = res.json().get("candidates") or []
+                if cands:
+                    parts = cands[0].get("content", {}).get("parts", [])
+                    text = "".join(p.get("text", "") for p in parts).strip()
+                    if text:
+                        return ten, text, None
+                loi = "phản hồi rỗng/bị chặn"
+                break
+            print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
+            loi = f"HTTP {res.status_code}"
+            if lan == 1 and res.status_code in (400, 404):
+                moi = _tim_model_gemini(k)
+                if moi and moi != mdl:
+                    print(f"[{ten}] đổi sang model: {moi}", flush=True)
+                    MODEL_CACHE[ten] = mdl = moi
+                    continue
+            break
+    return ten, None, loi
+
+
+def goi_cohere(prompt, he_thong=""):
+    ten = "Cohere"
+    if not COHERE_API_KEY:
         return ten, None, "chưa đặt khóa API"
     try:
         res = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            "https://api.cohere.com/v2/chat",
+            headers={"Authorization": f"Bearer {COHERE_API_KEY}", "Content-Type": "application/json"},
             json={
-                "model": model,
+                "model": COHERE_MODEL,
                 "messages": [
                     {"role": "system", "content": he_thong or MAC_DINH},
                     {"role": "user", "content": prompt},
@@ -68,56 +257,11 @@ def _openai_style(ten, url, key, model, prompt, he_thong):
             timeout=TIMEOUT,
         )
         if res.status_code == 200:
-            text = res.json()["choices"][0]["message"]["content"]
-            if text and text.strip():
+            blocks = res.json().get("message", {}).get("content", [])
+            text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+            if text:
                 return ten, text, None
             return ten, None, "phản hồi rỗng"
-        print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
-        return ten, None, f"HTTP {res.status_code}"
-    except Exception as e:
-        print(f"[{ten}] Exception: {e}", flush=True)
-        return ten, None, f"lỗi kết nối ({type(e).__name__})"
-
-
-def goi_aiml(prompt, he_thong=""):
-    return _openai_style("DOLA/AIML", "https://api.aimlapi.com/v1/chat/completions",
-                         AI_API_KEY, AI_MODEL, prompt, he_thong)
-
-
-def goi_groq(prompt, he_thong=""):
-    return _openai_style("Llama/Groq", "https://api.groq.com/openai/v1/chat/completions",
-                         GROQ_API_KEY, GROQ_MODEL, prompt, he_thong)
-
-
-def goi_gpt(prompt, he_thong=""):
-    return _openai_style("GPT", "https://api.openai.com/v1/chat/completions",
-                         OPENAI_API_KEY, OPENAI_MODEL, prompt, he_thong)
-
-
-def goi_gemini(prompt, he_thong=""):
-    ten = "Gemini"
-    if not GEMINI_API_KEY:
-        return ten, None, "chưa đặt khóa API"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    try:
-        res = requests.post(
-            url,
-            headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
-            json={
-                "systemInstruction": {"parts": [{"text": he_thong or MAC_DINH}]},
-                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2048},
-            },
-            timeout=TIMEOUT,
-        )
-        if res.status_code == 200:
-            cands = res.json().get("candidates") or []
-            if cands:
-                parts = cands[0].get("content", {}).get("parts", [])
-                text = "".join(p.get("text", "") for p in parts).strip()
-                if text:
-                    return ten, text, None
-            return ten, None, "phản hồi rỗng/bị chặn"
         print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
         return ten, None, f"HTTP {res.status_code}"
     except Exception as e:
@@ -159,32 +303,34 @@ def goi_claude(prompt, he_thong=""):
 
 
 def goi_theo_danh_sach(prompt, danh_sach_ham, he_thong=""):
-    """Thử lần lượt từng AI. Trả về dict: ok, reply (hiển thị), plain (nội dung thuần)."""
+    """Thử lần lượt từng AI (bỏ qua AI chưa có khóa). Trả về dict: ok, reply, plain."""
     loi_tong = []
     for ham in danh_sach_ham:
         ten, kq, loi = ham(prompt, he_thong)
         if kq:
             return {"ok": True, "reply": f"✅ [{ten}]\n{kq}", "plain": kq}
-        loi_tong.append(f"{ten}: {loi}")
+        if loi != "chưa đặt khóa API":
+            loi_tong.append(f"{ten}: {loi}")
+    if not loi_tong:
+        loi_tong.append("chưa cài khóa AI nào trên máy chủ")
     reply = "❌ Tất cả AI đều không trả lời:\n" + "\n".join(f"× {x}" for x in loi_tong)
     return {"ok": False, "reply": reply, "plain": ""}
 
 
-# Mỗi chức năng: (lời nhắc hệ thống, thứ tự AI thử)
+# Thứ tự thử: AI miễn phí trước, AI trả phí (dễ hết tiền) để cuối
+TAT_CA = [goi_openrouter, goi_groq, goi_sambanova, goi_gemini, goi_huggingface, goi_cohere,
+          goi_aiml, goi_gpt, goi_claude]
+
 CHATS = {
-    "general": ("Bạn là trợ lý AI tổng hợp, thông minh, hữu ích. Trả lời rõ ràng, dễ hiểu, bằng tiếng Việt.",
-                [goi_gemini, goi_aiml, goi_groq, goi_gpt, goi_claude]),
+    "general": ("Bạn là trợ lý AI tổng hợp, thông minh, hữu ích. Trả lời rõ ràng, dễ hiểu, bằng tiếng Việt.", TAT_CA),
     "data": ("Bạn là chuyên gia phân tích dữ liệu và lập báo cáo. Trả lời bằng tiếng Việt, tóm tắt số liệu quan trọng, "
-             "dùng bảng khi phù hợp.",
-             [goi_gemini, goi_aiml, goi_groq, goi_gpt]),
+             "dùng bảng khi phù hợp.", TAT_CA),
     "doc": ("Bạn là chuyên gia soạn thảo văn bản hành chính, hợp đồng, thư từ. Viết chuẩn mực, đúng thể thức Việt Nam.",
-            [goi_gpt, goi_claude, goi_gemini, goi_aiml]),
+            TAT_CA),
     "tender": ("Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, "
-               "hồ sơ, lưu ý pháp lý; nhắc người dùng đối chiếu văn bản pháp luật hiện hành.",
-               [goi_gemini, goi_groq, goi_aiml, goi_claude]),
+               "hồ sơ, lưu ý pháp lý; nhắc người dùng đối chiếu văn bản pháp luật hiện hành.", TAT_CA),
     "equip": ("Bạn là chuyên gia quản lý thiết bị nhà máy thủy điện. Phân loại, theo dõi tình trạng, đề xuất bảo trì, "
-              "tính tuổi thọ. Trả lời bằng tiếng Việt.",
-              [goi_gemini, goi_groq, goi_aiml]),
+              "tính tuổi thọ. Trả lời bằng tiếng Việt.", TAT_CA),
 }
 
 
@@ -494,19 +640,19 @@ textarea:focus{border-color:var(--c)}
 
 <script>
 const CARDS = [
- {id:"general",cls:"c-gen",icon:"💬",title:"Trò chuyện chung",ai:"Gemini → DOLA → Llama → GPT → Claude",
+ {id:"general",cls:"c-gen",icon:"💬",title:"Trò chuyện chung",ai:"Tự động chọn AI khả dụng",
   hello:"👋 Xin chào! Tôi là trợ lý AI tổng hợp. Bạn có thể hỏi bất kỳ điều gì nhé!",ph:"Hỏi bất kỳ điều gì...",
   quick:[["🔌 Thủy điện cơ bản","Giải thích khái niệm về nhà máy thủy điện"],["📰 Tin tức & Công nghệ","Tóm tắt xu hướng công nghệ mới trong ngành điện"],["💡 Ý tưởng & Đề xuất","Đề xuất ý tưởng tối ưu hóa hiệu suất làm việc"],["⚖️ Pháp luật chung","Giải đáp thắc mắc chung về pháp luật"]]},
- {id:"data",cls:"c-p1",icon:"📊",title:"Xử lý dữ liệu & Tạo báo cáo",ai:"Gemini → DOLA → Llama → GPT",file:true,sheet:true,
+ {id:"data",cls:"c-p1",icon:"📊",title:"Xử lý dữ liệu & Tạo báo cáo",ai:"Tự động chọn AI khả dụng",file:true,sheet:true,
   hello:"👋 Tải tệp, dán link Google Sheets hoặc nhập yêu cầu để bắt đầu phân tích nhé!",ph:"Nhập yêu cầu phân tích...",
   quick:[["📋 Sắp xếp dữ liệu","Sắp xếp và tóm tắt dữ liệu"],["💰 Tính tổng hợp","Tính tổng và phân tích số liệu"],["📑 Lập báo cáo","Lập báo cáo đầy đủ có cấu trúc"],["📈 Nhận xét & Đề xuất","Đánh giá xu hướng và đề xuất"]]},
- {id:"doc",cls:"c-p2",icon:"✍️",title:"Soạn thảo văn bản",ai:"GPT → Claude → Gemini → DOLA",
+ {id:"doc",cls:"c-p2",icon:"✍️",title:"Soạn thảo văn bản",ai:"Tự động chọn AI khả dụng",
   hello:"👋 Tôi sẽ giúp bạn soạn thảo văn bản chuẩn mực, đúng thể thức Việt Nam. Bạn cần viết gì?",ph:"Bạn cần soạn thảo gì...?",
   quick:[["📝 Công văn","Soạn thảo công văn gửi cấp trên"],["📄 Hợp đồng","Soạn thảo hợp đồng mua bán thiết bị"],["📈 Báo cáo tiến độ","Viết báo cáo tiến độ thực hiện dự án"],["📋 Thư & Biên bản","Soạn thảo thư mời họp và biên bản"]]},
- {id:"tender",cls:"c-p3",icon:"🏆",title:"Quy trình đấu thầu",ai:"Gemini → Llama → DOLA → Claude",
+ {id:"tender",cls:"c-p3",icon:"🏆",title:"Quy trình đấu thầu",ai:"Tự động chọn AI khả dụng",
   hello:"👋 Tôi hướng dẫn chi tiết theo quy định Việt Nam. Bạn cần hỗ trợ về bước nào?",ph:"Hỏi về quy trình đấu thầu...?",
   quick:[["📋 Toàn bộ quy trình","Giải thích toàn bộ quy trình đấu thầu"],["📑 Hồ sơ mời thầu","Danh mục hồ sơ cần chuẩn bị"],["⚖️ Pháp lý & Rủi ro","Lưu ý pháp lý và rủi ro thường gặp"],["📄 Biểu mẫu","Mẫu biểu mẫu thông dụng"]]},
- {id:"equip",cls:"c-p4",icon:"🔧",title:"Quản lý thiết bị",ai:"Gemini → Llama → DOLA",file:true,
+ {id:"equip",cls:"c-p4",icon:"🔧",title:"Quản lý thiết bị",ai:"Tự động chọn AI khả dụng",file:true,
   hello:"👋 Tải danh sách thiết bị hoặc nhập yêu cầu — tôi sẽ phân tích chi tiết nhé!",ph:"Nhập yêu cầu quản lý thiết bị...?",
   quick:[["📊 Phân loại thiết bị","Phân loại thiết bị theo nhóm"],["🛠️ Kế hoạch bảo trì","Đề xuất kế hoạch bảo trì định kỳ"],["⚠️ Đánh giá rủi ro","Đánh giá tình trạng và rủi ro"],["🔄 Tuổi thọ & Thay thế","Tính tuổi thọ và đề xuất thay thế"]]}
 ];
