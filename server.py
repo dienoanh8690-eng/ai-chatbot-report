@@ -1,239 +1,779 @@
+import hmac
 import os
 import re
+import time
 import uuid
 from datetime import datetime
+
 import requests
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
 from docx import Document
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # tối đa 10MB/tệp
 CORS(app)
 
-# === CẤU HÌNH ===
+# ==================================================
+# CẤU HÌNH — đặt trong Render → Environment
+# ==================================================
 def env(name, default=""):
-    val = os.environ.get(name, default)
-    return val.strip() if isinstance(val, str) else val
+    return os.environ.get(name, default).strip()
 
+AI_API_KEY = env("AI_API_KEY")                      # AIML API
+AI_MODEL = env("AI_MODEL", "bytedance/dola-seed-2-0-pro")
 GEMINI_API_KEY = env("GEMINI_API_KEY")
-GEMINI_MODEL = env("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = env("GEMINI_MODEL", "gemini-3.8-flash")
 GROQ_API_KEY = env("GROQ_API_KEY")
 GROQ_MODEL = env("GROQ_MODEL", "llama-3.3-70b-versatile")
+OPENROUTER_API_KEY = env("OPEN_ROUTER") or env("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", "openrouter/free")  # tự chọn model miễn phí đang chạy
+SAMBANOVA_API_KEY = env("SAMBANOVA")
+SAMBANOVA_MODEL = env("SAMBANOVA_MODEL", "Meta-Llama-3.3-70B-Instruct")
+HF_TOKEN = env("HUGGINGFACE_TOKEN")
+HF_MODEL = env("HF_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
+COHERE_API_KEY = env("COHERE").split("sk-ant")[0].strip()  # phòng khi dán nhầm khóa khác vào cuối
+COHERE_MODEL = env("COHERE_MODEL", "command-a-03-2025")
+OPENAI_API_KEY = env("OPENAI_API_KEY")
+OPENAI_MODEL = env("OPENAI_MODEL", "gpt-4o-mini")
+CLAUDE_API_KEY = env("CLAUDE") or env("ANTHROPIC_API_KEY")
+CLAUDE_MODEL = env("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+ADMIN_USER = env("ADMIN_USER")                      # tên đăng nhập (đặt trên Render)
+ADMIN_PASS = env("ADMIN_PASS")                      # mật khẩu (đặt trên Render)
+SECRET_KEY = env("SECRET_KEY") or os.urandom(24).hex()
+app.secret_key = SECRET_KEY
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                  SESSION_COOKIE_SECURE=bool(os.environ.get("RENDER")), PERMANENT_SESSION_LIFETIME=12 * 3600)
 
-TIMEOUT = 120
-OUTPUT_FOLDER = "outputs"
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-DEFAULT_PROMPT = "Trả lời bằng tiếng Việt rõ ràng, chính xác, phù hợp lĩnh vực thủy điện."
+TIMEOUT = 20
+UPLOAD_FOLDER = "tai_lieu_tai_len"
+RESULT_FOLDER = "ket_qua_xuat_ra"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(RESULT_FOLDER, exist_ok=True)
+MAC_DINH = "Trả lời bằng tiếng Việt rõ ràng, tự nhiên."
 
-# === GỌI AI ===
-def call_gemini(prompt, system=DEFAULT_PROMPT):
-    if not GEMINI_API_KEY:
-        return None, "Chưa có GEMINI_API_KEY"
+
+# ==================================================
+# GỌI TỪNG AI — mỗi hàm trả về (tên, nội dung, lỗi)
+# ==================================================
+MODEL_CACHE = {}  # tên AI -> model tự tìm được khi tên model cấu hình bị sai/đã đổi
+LOAI_TRU = ("whisper", "guard", "tts", "embed", "vision", "image", "audio", "moderation",
+            "safeguard", "orpheus", "playai", "rerank", "speech", "transcri", "distil")
+UU_TIEN = ("llama-3.3-70b", "gpt-oss-120b", "gpt-oss-20b", "llama-3.1-70b", "qwen3", "qwen",
+           "llama", "gemma", "mistral", "deepseek")
+
+
+def _tach_khoa(chuoi):
+    """Cho phép đặt nhiều khóa trong một biến, ngăn cách bằng dấu phẩy."""
+    return [k for k in re.split(r"[,;\s]+", chuoi or "") if k]
+
+
+def _tim_model_openai(base, key):
+    """Hỏi danh sách model của nhà cung cấp và chọn một model phù hợp."""
     try:
-        url = f"https://generativelanguage.googleapis.com/v1/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-        full = f"Hướng dẫn: {system}\nNội dung: {prompt}"
-        r = requests.post(url, json={"contents": [{"parts": [{"text": full}]}]}, timeout=TIMEOUT)
-        r.raise_for_status()
-        return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip(), None
-    except Exception as e:
-        return None, str(e)
+        r = requests.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"}, timeout=10)
+        if r.status_code != 200:
+            return None
+        ids = [m.get("id", "") for m in r.json().get("data", [])]
+        ids = [i for i in ids if i and not any(x in i.lower() for x in LOAI_TRU)]
+        for kw in UU_TIEN:
+            for i in ids:
+                if kw in i.lower():
+                    return i
+        return ids[0] if ids else None
+    except Exception:
+        return None
 
-def call_groq(messages):
-    if not GROQ_API_KEY:
-        return None, "Chưa có GROQ_API_KEY"
+
+def _tim_model_gemini(key):
     try:
-        r = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": GROQ_MODEL, "messages": messages, "max_tokens": 2048, "temperature": 0.7},
-            timeout=TIMEOUT
+        r = requests.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+                         headers={"x-goog-api-key": key}, timeout=10)
+        if r.status_code != 200:
+            return None
+        ds = []
+        for m in r.json().get("models", []):
+            ten = m.get("name", "").replace("models/", "")
+            low = ten.lower()
+            if "generateContent" not in m.get("supportedGenerationMethods", []):
+                continue
+            if "flash" not in low or any(x in low for x in (
+                    "lite", "image", "tts", "live", "audio", "exp", "thinking", "preview",
+                    "embedding", "robotics", "computer")):
+                continue
+            ver = tuple(int(x) for x in re.findall(r"\d+", low.split("flash")[0]))
+            ds.append((ver, ten))
+        ds.sort(reverse=True)
+        return ds[0][1] if ds else None
+    except Exception:
+        return None
+
+
+def _openai_style(ten, url, key, model, prompt, he_thong, timeout=TIMEOUT, base=None):
+    khoa = _tach_khoa(key)
+    if not khoa:
+        return ten, None, "chưa đặt khóa API"
+    loi = "lỗi không rõ"
+    for k in khoa:
+        mdl = MODEL_CACHE.get(ten, model)
+        for lan in (1, 2):
+            try:
+                res = requests.post(
+                    url,
+                    headers={"Authorization": f"Bearer {k}", "Content-Type": "application/json"},
+                    json={
+                        "model": mdl,
+                        "messages": [
+                            {"role": "system", "content": he_thong or MAC_DINH},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": 0.7,
+                        "max_tokens": 2048,
+                    },
+                    timeout=timeout,
+                )
+            except Exception as e:
+                print(f"[{ten}] Exception: {e}", flush=True)
+                loi = f"lỗi kết nối ({type(e).__name__})"
+                break
+            if res.status_code == 200:
+                try:
+                    text = res.json()["choices"][0]["message"]["content"]
+                except Exception:
+                    text = ""
+                if text and text.strip():
+                    return ten, text, None
+                loi = "phản hồi rỗng"
+                break
+            print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
+            loi = f"HTTP {res.status_code}"
+            if lan == 1 and base and res.status_code in (400, 404):
+                moi = _tim_model_openai(base, k)
+                if moi and moi != mdl:
+                    print(f"[{ten}] đổi sang model: {moi}", flush=True)
+                    MODEL_CACHE[ten] = mdl = moi
+                    continue
+            break
+    return ten, None, loi
+
+
+def goi_openrouter(prompt, he_thong=""):
+    return _openai_style("OpenRouter", "https://openrouter.ai/api/v1/chat/completions",
+                         OPENROUTER_API_KEY, OPENROUTER_MODEL, prompt, he_thong, timeout=35)
+
+
+def goi_groq(prompt, he_thong=""):
+    return _openai_style("Llama/Groq", "https://api.groq.com/openai/v1/chat/completions",
+                         GROQ_API_KEY, GROQ_MODEL, prompt, he_thong,
+                         base="https://api.groq.com/openai/v1")
+
+
+def goi_sambanova(prompt, he_thong=""):
+    return _openai_style("SambaNova", "https://api.sambanova.ai/v1/chat/completions",
+                         SAMBANOVA_API_KEY, SAMBANOVA_MODEL, prompt, he_thong,
+                         base="https://api.sambanova.ai/v1")
+
+
+def goi_huggingface(prompt, he_thong=""):
+    return _openai_style("HuggingFace", "https://router.huggingface.co/v1/chat/completions",
+                         HF_TOKEN, HF_MODEL, prompt, he_thong, timeout=30,
+                         base="https://router.huggingface.co/v1")
+
+
+def goi_aiml(prompt, he_thong=""):
+    return _openai_style("DOLA/AIML", "https://api.aimlapi.com/v1/chat/completions",
+                         AI_API_KEY, AI_MODEL, prompt, he_thong)
+
+
+def goi_gpt(prompt, he_thong=""):
+    return _openai_style("GPT", "https://api.openai.com/v1/chat/completions",
+                         OPENAI_API_KEY, OPENAI_MODEL, prompt, he_thong)
+
+
+def goi_gemini(prompt, he_thong=""):
+    ten = "Gemini"
+    khoa = _tach_khoa(GEMINI_API_KEY)
+    if not khoa:
+        return ten, None, "chưa đặt khóa API"
+    loi = "lỗi không rõ"
+    for k in khoa:
+        mdl = MODEL_CACHE.get(ten, GEMINI_MODEL)
+        for lan in (1, 2):
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{mdl}:generateContent"
+            try:
+                res = requests.post(
+                    url,
+                    headers={"x-goog-api-key": k, "Content-Type": "application/json"},
+                    json={
+                        "systemInstruction": {"parts": [{"text": he_thong or MAC_DINH}]},
+                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2048},
+                    },
+                    timeout=TIMEOUT,
+                )
+            except Exception as e:
+                print(f"[{ten}] Exception: {e}", flush=True)
+                loi = f"lỗi kết nối ({type(e).__name__})"
+                break
+            if res.status_code == 200:
+                cands = res.json().get("candidates") or []
+                if cands:
+                    parts = cands[0].get("content", {}).get("parts", [])
+                    text = "".join(p.get("text", "") for p in parts).strip()
+                    if text:
+                        return ten, text, None
+                loi = "phản hồi rỗng/bị chặn"
+                break
+            print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
+            loi = f"HTTP {res.status_code}"
+            if lan == 1 and res.status_code in (400, 404):
+                moi = _tim_model_gemini(k)
+                if moi and moi != mdl:
+                    print(f"[{ten}] đổi sang model: {moi}", flush=True)
+                    MODEL_CACHE[ten] = mdl = moi
+                    continue
+            break
+    return ten, None, loi
+
+
+def goi_cohere(prompt, he_thong=""):
+    ten = "Cohere"
+    if not COHERE_API_KEY:
+        return ten, None, "chưa đặt khóa API"
+    try:
+        res = requests.post(
+            "https://api.cohere.com/v2/chat",
+            headers={"Authorization": f"Bearer {COHERE_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": COHERE_MODEL,
+                "messages": [
+                    {"role": "system", "content": he_thong or MAC_DINH},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 2048,
+            },
+            timeout=TIMEOUT,
         )
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"].strip(), None
+        if res.status_code == 200:
+            blocks = res.json().get("message", {}).get("content", [])
+            text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+            if text:
+                return ten, text, None
+            return ten, None, "phản hồi rỗng"
+        print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
+        return ten, None, f"HTTP {res.status_code}"
     except Exception as e:
-        return None, str(e)
+        print(f"[{ten}] Exception: {e}", flush=True)
+        return ten, None, f"lỗi kết nối ({type(e).__name__})"
 
-def chat_ai(prompt, system=DEFAULT_PROMPT):
-    msg = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
-    for name, fn in [("Gemini", lambda: call_gemini(prompt, system)), ("Groq", lambda: call_groq(msg))]:
-        text, err = fn()
-        if text:
-            return f"✅ [{name}]\n{text}", text
-    return "❌ Kiểm tra lại API key", ""
 
-# === XUẤT FILE ===
-def clean(t): return re.sub(r"[*_`#]", "", t)
-
-def make_word(content):
+def goi_claude(prompt, he_thong=""):
+    ten = "Claude"
+    if not CLAUDE_API_KEY:
+        return ten, None, "chưa đặt khóa API"
     try:
+        res = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": CLAUDE_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": CLAUDE_MODEL,
+                "max_tokens": 2048,
+                "system": he_thong or MAC_DINH,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=TIMEOUT,
+        )
+        if res.status_code == 200:
+            blocks = res.json().get("content", [])
+            text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+            if text:
+                return ten, text, None
+            return ten, None, "phản hồi rỗng"
+        print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
+        return ten, None, f"HTTP {res.status_code}"
+    except Exception as e:
+        print(f"[{ten}] Exception: {e}", flush=True)
+        return ten, None, f"lỗi kết nối ({type(e).__name__})"
+
+
+def goi_theo_danh_sach(prompt, danh_sach_ham, he_thong=""):
+    """Thử lần lượt từng AI (bỏ qua AI chưa có khóa). Trả về dict: ok, reply, plain."""
+    loi_tong = []
+    for ham in danh_sach_ham:
+        ten, kq, loi = ham(prompt, he_thong)
+        if kq:
+            return {"ok": True, "reply": f"✅ [{ten}]\n{kq}", "plain": kq}
+        if loi != "chưa đặt khóa API":
+            loi_tong.append(f"{ten}: {loi}")
+    if not loi_tong:
+        loi_tong.append("chưa cài khóa AI nào trên máy chủ")
+    reply = "❌ Tất cả AI đều không trả lời:\n" + "\n".join(f"× {x}" for x in loi_tong)
+    return {"ok": False, "reply": reply, "plain": ""}
+
+
+# Thứ tự thử: AI miễn phí trước, AI trả phí (dễ hết tiền) để cuối
+TAT_CA = [goi_openrouter, goi_groq, goi_sambanova, goi_gemini, goi_huggingface, goi_cohere,
+          goi_aiml, goi_gpt, goi_claude]
+
+CHATS = {
+    "general": ("Bạn là trợ lý AI tổng hợp, thông minh, hữu ích. Trả lời rõ ràng, dễ hiểu, bằng tiếng Việt.", TAT_CA),
+    "data": ("Bạn là chuyên gia phân tích dữ liệu và lập báo cáo. Trả lời bằng tiếng Việt, tóm tắt số liệu quan trọng, "
+             "dùng bảng khi phù hợp.", TAT_CA),
+    "doc": ("Bạn là chuyên gia soạn thảo văn bản hành chính, hợp đồng, thư từ. Viết chuẩn mực, đúng thể thức Việt Nam.",
+            TAT_CA),
+    "tender": ("Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, "
+               "hồ sơ, lưu ý pháp lý; nhắc người dùng đối chiếu văn bản pháp luật hiện hành.", TAT_CA),
+    "equip": ("Bạn là chuyên gia quản lý thiết bị nhà máy thủy điện. Phân loại, theo dõi tình trạng, đề xuất bảo trì, "
+              "tính tuổi thọ. Trả lời bằng tiếng Việt.", TAT_CA),
+}
+
+
+# ==================================================
+# TẠO TỆP WORD & EXCEL
+# ==================================================
+def _sach(dong):
+    return re.sub(r"[*#`]+", "", dong).strip()
+
+
+def tao_word(noi_dung):
+    try:
+        ten = f"bao_cao_{uuid.uuid4().hex[:8]}.docx"
         doc = Document()
         doc.add_heading("BÁO CÁO", 0)
-        doc.add_paragraph(f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-        doc.add_paragraph("")
-        for p in content.split("\n"):
-            if p.strip(): doc.add_paragraph(clean(p))
-        fn = f"baocao_{uuid.uuid4().hex[:6]}.docx"
-        doc.save(os.path.join(OUTPUT_FOLDER, fn))
-        return fn
-    except: return None
+        doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+        for dong in noi_dung.split("\n"):
+            d = _sach(dong)
+            if d and not re.fullmatch(r"[|\-:\s]+", d):
+                doc.add_paragraph(d)
+        doc.save(os.path.join(RESULT_FOLDER, ten))
+        return ten
+    except Exception as e:
+        print(f"Lỗi tạo Word: {e}", flush=True)
+        return ""
 
-def make_excel(content):
+
+def tao_excel(noi_dung):
     try:
+        ten = f"bao_cao_{uuid.uuid4().hex[:8]}.xlsx"
         wb = Workbook()
         ws = wb.active
-        ws.append([f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}"])
-        ws.append(["Nội dung"])
-        for line in content.split("\n"):
-            if line.strip(): ws.append([clean(line)])
-        fn = f"baocao_{uuid.uuid4().hex[:6]}.xlsx"
-        wb.save(os.path.join(OUTPUT_FOLDER, fn))
-        return fn
-    except: return None
+        ws.title = "BÁO CÁO"
+        ws["A1"] = f"Ngày: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        hang = 3
+        for dong in noi_dung.split("\n"):
+            d = dong.strip()
+            if not d:
+                continue
+            if d.startswith("|"):  # dòng bảng markdown → tách thành ô
+                if re.fullmatch(r"[|\-:\s]+", d):
+                    continue
+                for i, cell in enumerate(d.strip("|").split("|"), start=1):
+                    ws.cell(row=hang, column=i, value=_sach(cell))
+            else:
+                ws.cell(row=hang, column=1, value=_sach(d))
+            hang += 1
+        wb.save(os.path.join(RESULT_FOLDER, ten))
+        return ten
+    except Exception as e:
+        print(f"Lỗi tạo Excel: {e}", flush=True)
+        return ""
 
-# === ROUTES ===
+
+def doc_google_sheet(sheet_url):
+    try:
+        m = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", sheet_url)
+        if not m:
+            return None, "❌ Link không đúng định dạng Google Sheets"
+        csv_url = f"https://docs.google.com/spreadsheets/d/{m.group(1)}/export?format=csv"
+        res = requests.get(csv_url, timeout=15)
+        if res.status_code == 200:
+            res.encoding = "utf-8"
+            return res.text, None
+        return None, "❌ Không đọc được Sheet → Chia sẻ: «Bất kỳ ai có đường liên kết» (Người xem)"
+    except Exception as e:
+        return None, f"❌ Lỗi đọc Sheet: {e}"
+
+
+# ==================================================
+# ĐĂNG NHẬP (tài khoản lấy từ biến môi trường ADMIN_USER / ADMIN_PASS)
+# ==================================================
+THU_SAI = {}  # ip -> (số lần sai, thời điểm hết khóa)
+
+
+def _ip():
+    return (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
+
+
+@app.before_request
+def bat_dang_nhap():
+    p = request.path
+    if p in ("/api/login", "/api/logout", "/api/me"):
+        return
+    if (p.startswith("/api/") or p.startswith("/download/")) and not session.get("user"):
+        return jsonify({"error": "Cần đăng nhập", "reply": "❌ Vui lòng đăng nhập."}), 401
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    ip = _ip()
+    so, khoa = THU_SAI.get(ip, (0, 0))
+    if khoa > time.time():
+        return jsonify({"error": "Sai quá nhiều lần, vui lòng thử lại sau vài phút."}), 429
+    if not ADMIN_USER or not ADMIN_PASS:
+        return jsonify({"error": "Chưa cấu hình ADMIN_USER / ADMIN_PASS trên máy chủ."}), 500
+    d = request.get_json(silent=True) or {}
+    u = str(d.get("username", "")).strip().lower().encode()
+    pw = str(d.get("password", "")).encode()
+    ok_u = hmac.compare_digest(u, ADMIN_USER.lower().encode())
+    ok_p = hmac.compare_digest(pw, ADMIN_PASS.encode())
+    if ok_u and ok_p:
+        THU_SAI.pop(ip, None)
+        session.clear()
+        session["user"] = ADMIN_USER
+        session.permanent = True
+        return jsonify({"status": "ok"})
+    so += 1
+    THU_SAI[ip] = (0, time.time() + 300) if so >= 5 else (so, 0)
+    return jsonify({"error": "Sai tên đăng nhập hoặc mật khẩu."}), 401
+
+
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/me")
+def me():
+    return jsonify({"logged_in": bool(session.get("user"))})
+
+
+# ==================================================
+# API
+# ==================================================
+@app.route("/api/upload", methods=["POST"])
+def upload():
+    if "file" not in request.files:
+        return jsonify({"error": "Không có tệp"}), 400
+    tep = request.files["file"]
+    ten_goc = tep.filename or "tep"
+    ext = ten_goc.rsplit(".", 1)[-1].lower() if "." in ten_goc else ""
+    if ext not in ("xlsx", "csv", "txt"):
+        return jsonify({"error": "Chỉ hỗ trợ .xlsx, .csv, .txt"}), 400
+    duong_dan = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4().hex[:10]}.{ext}")
+    tep.save(duong_dan)
+    noi_dung = ""
+    try:
+        if ext == "xlsx":
+            wb = load_workbook(duong_dan, data_only=True, read_only=True)
+            for ws in wb.worksheets:
+                noi_dung += f"=== Trang tính: {ws.title} ===\n"
+                for hang in ws.iter_rows(values_only=True):
+                    noi_dung += " | ".join("" if c is None else str(c) for c in hang) + "\n"
+                    if len(noi_dung) > 6000:
+                        break
+                if len(noi_dung) > 6000:
+                    break
+            wb.close()
+        else:
+            with open(duong_dan, "r", encoding="utf-8-sig", errors="ignore") as fh:
+                noi_dung = fh.read()
+    except Exception as e:
+        noi_dung = f"(Không đọc được nội dung: {e})"
+    return jsonify({"status": "ok", "name": ten_goc, "content": noi_dung[:6000]})
+
+
+@app.route("/api/connect-sheet", methods=["POST"])
+def connect_sheet():
+    url = ((request.get_json(silent=True) or {}).get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "Vui lòng dán link Google Sheets"}), 400
+    noi_dung, loi = doc_google_sheet(url)
+    if loi:
+        return jsonify({"error": loi}), 400
+    return jsonify({"status": "ok", "content": noi_dung[:6000]})
+
+
+@app.route("/api/chat/<kind>", methods=["POST"])
+def chat(kind):
+    if kind not in CHATS:
+        return jsonify({"reply": "❌ Chức năng không tồn tại"}), 404
+    data = request.get_json(silent=True) or {}
+    msg = (data.get("message") or "").strip()
+    ctx = "\n---\n".join(x for x in [(data.get("file_content") or "")[:6000],
+                                      (data.get("sheet_content") or "")[:6000]] if x.strip())
+    if not msg and not ctx:
+        return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải dữ liệu!"})
+    prompt = f"{msg or 'Hãy phân tích dữ liệu sau.'}\n\nDữ liệu đính kèm:\n{ctx}" if ctx else msg
+    he_thong, danh_sach = CHATS[kind]
+    kq = goi_theo_danh_sach(prompt, danh_sach, he_thong)
+    out = {"reply": kq["reply"], "word": "", "excel": ""}
+    if kind == "data" and kq["ok"]:
+        w, x = tao_word(kq["plain"]), tao_excel(kq["plain"])
+        out["word"] = f"/download/{w}" if w else ""
+        out["excel"] = f"/download/{x}" if x else ""
+    return jsonify(out)
+
+
+@app.route("/download/<path:ten_file>")
+def download(ten_file):
+    ten_file = os.path.basename(ten_file)
+    return send_from_directory(RESULT_FOLDER, ten_file, as_attachment=True)
+
+
+@app.route("/healthz")
+def healthz():
+    return "ok"
+
+
+# ==================================================
+# GIAO DIỆN
+# ==================================================
 @app.route("/")
-def index():
-    return '''<!DOCTYPE html>
+def trang_chu():
+    return TRANG_CHU
+
+
+TRANG_CHU = r'''<!DOCTYPE html>
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>All Thủy Điện</title>
+<title>All Thủy Điện — Hệ thống hỗ trợ toàn diện</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box;font-family:Segoe UI,sans-serif}
-:root{--p:#2563eb;--s:#16a34a;--g:#f59e0b}
-body{background:linear-gradient(135deg,#eff6ff,#f0fdf4);min-height:100vh;padding:20px}
-h1{text-align:center;color:var(--p);margin-bottom:24px;font-size:22px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:20px;max-width:1300px;margin:0 auto}
-.card{background:#fff;border-radius:16px;padding:20px;box-shadow:0 4px 12px rgba(0,0,0,.06);display:flex;flex-direction:column;height:650px}
-.card h2{font-size:16px;color:var(--p);margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e2e8f0}
-.chat{flex:1;overflow-y:auto;padding:12px;background:#f8fafc;border-radius:12px;margin-bottom:12px}
-.msg{margin:8px 0;max-width:90%}
-.msg.u{margin-left:auto}
-.msg.a{margin-right:auto}
-.bubble{padding:12px 16px;border-radius:16px;line-height:1.5;font-size:14px}
-.u .bubble{background:var(--p);color:#fff;border-bottom-right-radius:4px}
-.a .bubble{background:#e2e8f0;color:#1e293b;border-bottom-left-radius:4px}
-textarea{width:100%;padding:12px;border:1px solid #e2e8f0;border-radius:12px;font-size:14px;resize:none;height:60px;margin-bottom:8px}
-button{padding:10px 16px;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer}
-.b1{background:var(--p);color:#fff}
-.b2{background:var(--s);color:#fff}
-.b3{background:var(--g);color:#fff}
-.btn-row{display:flex;gap:8px}
-.info{font-size:13px;line-height:2;color:#475569}
-hr{border:none;border-top:1px solid #e2e8f0;margin:16px 0}
+:root{--g100:#f1f5f9;--g200:#e2e8f0;--g600:#475569;--g800:#1e293b}
+*{margin:0;padding:0;box-sizing:border-box;font-family:Inter,"Segoe UI",Roboto,Arial,sans-serif}
+body{background:linear-gradient(135deg,#f0f7ff,#faf5ff);min-height:100vh;padding:20px}
+.header{text-align:center;margin-bottom:28px;padding-top:10px}
+.header h1{font-size:26px;color:var(--g800);margin-bottom:6px}
+.header p{color:var(--g600);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;max-width:2200px;margin:0 auto}
+@media(max-width:1400px){.grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:768px){.grid{grid-template-columns:1fr}}
+.card{background:#fff;border-radius:20px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,.06);display:flex;flex-direction:column;height:720px;min-height:650px;border-top:4px solid var(--c)}
+.c-gen{--c:#6366f1;--cl:#e0e7ff;--cb:#eef2ff}.c-p1{--c:#2563eb;--cl:#dbeafe;--cb:#eff6ff}
+.c-p2{--c:#16a34a;--cl:#dcfce7;--cb:#f0fdf4}.c-p3{--c:#9333ea;--cl:#f3e8ff;--cb:#faf5ff}
+.c-p4{--c:#f59e0b;--cl:#fef3c7;--cb:#fffbeb}.c-p5{--c:#ec4899;--cl:#fce7f3;--cb:#fdf2f8}
+.card-head{display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:14px;border-bottom:2px solid var(--cl);flex-wrap:wrap}
+.card-icon{font-size:24px}.card-title{font-size:17px;font-weight:700;color:var(--c)}
+.card-ai{font-size:11px;color:#94a3b8;margin-left:auto;background:var(--g100);padding:3px 8px;border-radius:12px}
+.upload-zone{border:2px dashed var(--g200);border-radius:12px;padding:14px;text-align:center;cursor:pointer;margin-bottom:12px}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--c);background:var(--cb)}
+.upload-zone p{font-size:13px;color:var(--g600)}
+.file-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:500;background:var(--cl);color:var(--g800)}
+.file-bar button{margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:#dc2626}
+.sheet-bar{display:flex;gap:8px;margin-bottom:12px}
+.sheet-bar input{flex:1;padding:10px 14px;border:1px solid var(--g200);border-radius:8px;font-size:13px;outline:none}
+.sheet-bar button{padding:10px 16px;border:none;border-radius:8px;background:var(--c);color:#fff;cursor:pointer;font-weight:600;font-size:13px}
+.quick-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.q-btn{padding:10px 12px;border:1px solid var(--g200);border-radius:8px;background:#fff;cursor:pointer;font-size:12px;text-align:left;line-height:1.4}
+.q-btn:hover{border-color:var(--c);background:var(--cb)}
+.chat-area{flex:1;overflow-y:auto;padding:4px;margin-bottom:14px;min-height:200px}
+.msg{margin-bottom:16px;max-width:98%}.msg.user{margin-left:auto}
+.bubble{padding:14px 18px;border-radius:18px;line-height:1.6;font-size:14px;white-space:pre-wrap;word-break:break-word}
+.msg.user .bubble{background:linear-gradient(135deg,#dbeafe,#e0e7ff);border-bottom-right-radius:8px;color:#1e3a8a}
+.msg.ai .bubble{background:var(--g100);border-bottom-left-radius:8px;color:var(--g800)}
+.bubble.warn{background:#fef3c7;border-left:3px solid #f59e0b;color:#92400e}
+.bubble.err{background:#fee2e2;border-left:3px solid #ef4444;color:#b91c1c}
+.dl-group{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+.dl-btn{padding:8px 16px;border-radius:20px;text-decoration:none;font-size:13px;font-weight:600}
+.dl-word{background:#dbeafe;color:#1d4ed8}.dl-excel{background:#dcfce7;color:#15803d}
+.input-row{display:flex;gap:10px;align-items:flex-end}
+textarea{flex:1;min-height:48px;max-height:120px;padding:12px 18px;border:1px solid var(--g200);border-radius:24px;font-size:14px;resize:none;outline:none;line-height:1.5}
+textarea:focus{border-color:var(--c)}
+.send-btn{width:44px;height:44px;border-radius:50%;border:none;color:#fff;background:var(--c);cursor:pointer;font-size:18px;flex-shrink:0}
+.send-btn:disabled{opacity:.5;cursor:not-allowed}
+.hidden{display:none!important}
+.contact-row{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--g100);font-size:14px}
+.contact-row:last-child{border-bottom:none}
+.contact-label{font-weight:600;color:var(--c);min-width:90px;flex-shrink:0}
+.contact-row a{color:var(--c);text-decoration:none}
+#login{position:fixed;inset:0;background:linear-gradient(135deg,#f0f7ff,#faf5ff);display:flex;align-items:center;justify-content:center;z-index:99;padding:20px}
+.login-box{background:#fff;border-radius:20px;padding:32px;width:100%;max-width:380px;box-shadow:0 10px 30px rgba(37,99,235,.12);text-align:center}
+.login-box h2{color:var(--g800);margin-bottom:6px;font-size:22px}
+.login-box p{color:var(--g600);font-size:13px;margin-bottom:20px}
+.login-box input{width:100%;padding:12px 16px;border:1px solid var(--g200);border-radius:10px;font-size:14px;margin-bottom:12px;outline:none}
+.login-box input:focus{border-color:#2563eb}
+.login-box button{width:100%;padding:12px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-weight:600;font-size:15px;cursor:pointer}
+.login-box button:disabled{opacity:.6}
+#loginErr{color:#b91c1c;font-size:13px;min-height:18px;margin-bottom:10px}
+.header{position:relative}
+.logout{position:absolute;right:0;top:0;padding:8px 16px;border:1px solid var(--g200);border-radius:20px;background:#fff;cursor:pointer;font-size:13px}
 </style>
 </head>
 <body>
-<h1>⚡ All Thủy Điện — Hệ thống hỗ trợ</h1>
-<div class="grid">
-  <!-- Cột 1 -->
-  <div class="card">
-    <h2>✍️ Soạn thảo văn bản</h2>
-    <div class="chat" id="c1"></div>
-    <textarea id="i1" placeholder="Nhập yêu cầu..."></textarea>
-    <div class="btn-row">
-      <button class="b1" onclick="go(1)">Gửi</button>
-      <button class="b2" onclick="dl(1,'word')">Word</button>
-      <button class="b3" onclick="dl(1,'excel')">Excel</button>
-    </div>
-  </div>
-
-  <!-- Cột 2 -->
-  <div class="card">
-    <h2>📊 Quy trình & Báo cáo</h2>
-    <div class="chat" id="c2"></div>
-    <textarea id="i2" placeholder="Nhập yêu cầu..."></textarea>
-    <div class="btn-row">
-      <button class="b1" onclick="go(2)">Gửi</button>
-      <button class="b2" onclick="dl(2,'word')">Word</button>
-      <button class="b3" onclick="dl(2,'excel')">Excel</button>
-    </div>
-  </div>
-
-  <!-- Cột 3 -->
-  <div class="card">
-    <h2>📌 Thông tin liên hệ</h2>
-    <div class="info" style="flex:1">
-      <p><strong>Admin:</strong> Chotvjp</p>
-      <p><strong>ĐT:</strong> 0973020486</p>
-      <p><strong>Gmail:</strong> hoangdien86ncc@gmail.com</p>
-      <p><strong>Bộ phận:</strong> Quản lý kỹ thuật</p>
-      <p><strong>Đơn vị:</strong> Công ty CP Thủy điện Nậm Chiến</p>
-      <p><strong>Địa chỉ:</strong> TK5 - Mường La - Sơn La</p>
-      <p><strong>Website:</strong> namchien.vn</p>
-      <hr>
-      <p style="color:#94a3b8">© 2026 — Hệ thống hỗ trợ AI</p>
-    </div>
-  </div>
+<div id="login"><div class="login-box">
+<h2>⚡ All Thủy Điện</h2><p>Vui lòng đăng nhập để sử dụng hệ thống</p>
+<input type="text" id="lu" placeholder="Tên đăng nhập" autocomplete="username">
+<input type="password" id="lp" placeholder="Mật khẩu" autocomplete="current-password">
+<div id="loginErr"></div>
+<button id="lb">Đăng nhập</button>
+</div></div>
+<div class="header">
+<button class="logout hidden" id="logoutBtn">🚪 Đăng xuất</button>
+<h1>⚡ All Thủy Điện — Hệ thống hỗ trợ toàn diện</h1>
+<p>Trò chuyện chung · Phân tích dữ liệu · Soạn thảo văn bản · Tư vấn đấu thầu · Quản lý thiết bị · Thông tin liên hệ</p>
+</div>
+<div class="grid" id="grid">
+<div class="card c-p5" id="contactCard">
+<div class="card-head"><span class="card-icon">📌</span><h3 class="card-title">Thông tin liên hệ</h3></div>
+<div>
+<div class="contact-row"><span>👤</span><span class="contact-label">Admin:</span><span>Chotvjp</span></div>
+<div class="contact-row"><span>📞</span><span class="contact-label">Điện thoại:</span><a href="tel:0973020486">0973020486</a></div>
+<div class="contact-row"><span>✉️</span><span class="contact-label">Email:</span><a href="mailto:hoangdien86ncc@gmail.com">hoangdien86ncc@gmail.com</a></div>
+<div class="contact-row"><span>🏢</span><span class="contact-label">Bộ phận:</span><span>Quản lý kỹ thuật</span></div>
+<div class="contact-row"><span>🏭</span><span class="contact-label">Đơn vị:</span><span>Công ty Cổ phần Thủy điện Nậm Chiến</span></div>
+<div class="contact-row"><span>📍</span><span class="contact-label">Địa chỉ:</span><span>TK5 - Mường La - Sơn La</span></div>
+<div class="contact-row"><span>🌐</span><span class="contact-label">Website:</span><a href="https://namchien.vn" target="_blank" rel="noopener">namchien.vn</a></div>
+</div>
+<div style="margin-top:auto;padding-top:16px;text-align:center;font-size:12px;color:#9ca3af">
+<p>Hệ thống hỗ trợ công việc nội bộ</p><p>© 2026 Công ty Cổ phần Thủy điện Nậm Chiến</p>
+</div>
+</div>
 </div>
 
 <script>
-let last = {1:"",2:""};
-const sys = {1:"Bạn soạn thảo văn bản chính thức, chuẩn tiếng Việt trang trọng.",
-             2:"Bạn là chuyên gia thủy điện, phân tích dữ liệu, lập quy trình, báo cáo kỹ thuật chi tiết."};
+const CARDS = [
+ {id:"general",cls:"c-gen",icon:"💬",title:"Trò chuyện chung",ai:"Tự động chọn AI khả dụng",
+  hello:"👋 Xin chào! Tôi là trợ lý AI tổng hợp. Bạn có thể hỏi bất kỳ điều gì nhé!",ph:"Hỏi bất kỳ điều gì...",
+  quick:[["🔌 Thủy điện cơ bản","Giải thích khái niệm về nhà máy thủy điện"],["📰 Tin tức & Công nghệ","Tóm tắt xu hướng công nghệ mới trong ngành điện"],["💡 Ý tưởng & Đề xuất","Đề xuất ý tưởng tối ưu hóa hiệu suất làm việc"],["⚖️ Pháp luật chung","Giải đáp thắc mắc chung về pháp luật"]]},
+ {id:"data",cls:"c-p1",icon:"📊",title:"Xử lý dữ liệu & Tạo báo cáo",ai:"Tự động chọn AI khả dụng",file:true,sheet:true,
+  hello:"👋 Tải tệp, dán link Google Sheets hoặc nhập yêu cầu để bắt đầu phân tích nhé!",ph:"Nhập yêu cầu phân tích...",
+  quick:[["📋 Sắp xếp dữ liệu","Sắp xếp và tóm tắt dữ liệu"],["💰 Tính tổng hợp","Tính tổng và phân tích số liệu"],["📑 Lập báo cáo","Lập báo cáo đầy đủ có cấu trúc"],["📈 Nhận xét & Đề xuất","Đánh giá xu hướng và đề xuất"]]},
+ {id:"doc",cls:"c-p2",icon:"✍️",title:"Soạn thảo văn bản",ai:"Tự động chọn AI khả dụng",
+  hello:"👋 Tôi sẽ giúp bạn soạn thảo văn bản chuẩn mực, đúng thể thức Việt Nam. Bạn cần viết gì?",ph:"Bạn cần soạn thảo gì...?",
+  quick:[["📝 Công văn","Soạn thảo công văn gửi cấp trên"],["📄 Hợp đồng","Soạn thảo hợp đồng mua bán thiết bị"],["📈 Báo cáo tiến độ","Viết báo cáo tiến độ thực hiện dự án"],["📋 Thư & Biên bản","Soạn thảo thư mời họp và biên bản"]]},
+ {id:"tender",cls:"c-p3",icon:"🏆",title:"Quy trình đấu thầu",ai:"Tự động chọn AI khả dụng",
+  hello:"👋 Tôi hướng dẫn chi tiết theo quy định Việt Nam. Bạn cần hỗ trợ về bước nào?",ph:"Hỏi về quy trình đấu thầu...?",
+  quick:[["📋 Toàn bộ quy trình","Giải thích toàn bộ quy trình đấu thầu"],["📑 Hồ sơ mời thầu","Danh mục hồ sơ cần chuẩn bị"],["⚖️ Pháp lý & Rủi ro","Lưu ý pháp lý và rủi ro thường gặp"],["📄 Biểu mẫu","Mẫu biểu mẫu thông dụng"]]},
+ {id:"equip",cls:"c-p4",icon:"🔧",title:"Quản lý thiết bị",ai:"Tự động chọn AI khả dụng",file:true,
+  hello:"👋 Tải danh sách thiết bị hoặc nhập yêu cầu — tôi sẽ phân tích chi tiết nhé!",ph:"Nhập yêu cầu quản lý thiết bị...?",
+  quick:[["📊 Phân loại thiết bị","Phân loại thiết bị theo nhóm"],["🛠️ Kế hoạch bảo trì","Đề xuất kế hoạch bảo trì định kỳ"],["⚠️ Đánh giá rủi ro","Đánh giá tình trạng và rủi ro"],["🔄 Tuổi thọ & Thay thế","Tính tuổi thọ và đề xuất thay thế"]]}
+];
 
-function add(col,role,t){
-  const box = document.getElementById(`c${col}`);
-  const d = document.createElement("div");
-  d.className = `msg ${role}`;
-  d.innerHTML = `<div class="bubble">${t.replace(/\n/g,"<br>")}</div>`;
-  box.appendChild(d);
-  box.scrollTop = box.scrollHeight;
-  if(role==="a") last[col]=t;
+const $ = id => document.getElementById(id);
+const ST = {};
+
+function cardHTML(c){
+  return '<div class="card-head"><span class="card-icon">'+c.icon+'</span><h3 class="card-title">'+c.title+'</h3><span class="card-ai">'+c.ai+'</span></div>'
+  +(c.file?'<div class="upload-zone" id="up-'+c.id+'"><p>📎 Nhấn chọn hoặc kéo thả tệp (.xlsx, .csv, .txt)</p></div><input type="file" id="fi-'+c.id+'" accept=".xlsx,.csv,.txt" class="hidden"><div class="file-bar hidden" id="fb-'+c.id+'"><span></span><button>✕</button></div>':"")
+  +(c.sheet?'<div class="sheet-bar"><input type="text" id="su-'+c.id+'" placeholder="🔗 Dán link Google Sheets..."><button id="sb-'+c.id+'">Kết nối</button></div><div class="file-bar hidden" id="sh-'+c.id+'"><span>✅ Google Sheets đã kết nối</span><button>✕</button></div>':"")
+  +'<div class="quick-btns">'+c.quick.map((q,k)=>'<button class="q-btn" data-k="'+k+'">'+q[0]+'</button>').join("")+'</div>'
+  +'<div class="chat-area" id="ch-'+c.id+'"></div>'
+  +'<div class="input-row"><textarea id="in-'+c.id+'" placeholder="'+c.ph+'"></textarea><button class="send-btn" id="sd-'+c.id+'">➤</button></div>';
 }
 
-async function go(col){
-  const ta = document.getElementById(`i${col}`);
-  const txt = ta.value.trim();
-  if(!txt) return;
-  add(col,"u",txt); ta.value="";
-  add(col,"a","⏳ Đang xử lý...");
-  const res = await fetch("/api/chat",{
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({p:txt,s:sys[col]})
-  });
-  const d = await res.json();
-  const box = document.getElementById(`c${col}`);
-  box.lastChild.remove();
-  add(col,"a",d.rpy||"Lỗi");
+function addMsg(id, type, text, d){
+  const m = document.createElement("div"); m.className = "msg "+type;
+  const b = document.createElement("div"); b.className = "bubble"+(text.includes("❌")?" err":text.includes("⚠️")?" warn":"");
+  b.textContent = text; m.appendChild(b);
+  if(d && (d.word || d.excel)){
+    const g = document.createElement("div"); g.className = "dl-group";
+    if(d.word) g.innerHTML += '<a class="dl-btn dl-word" href="'+d.word+'" target="_blank">📄 Tải Word</a>';
+    if(d.excel) g.innerHTML += '<a class="dl-btn dl-excel" href="'+d.excel+'" target="_blank">📊 Tải Excel</a>';
+    b.appendChild(g);
+  }
+  const c = $("ch-"+id); c.appendChild(m); c.scrollTop = c.scrollHeight;
 }
 
-async function dl(col,type){
-  if(!last[col]) return alert("Chưa có nội dung để tải");
-  const res = await fetch("/api/export",{
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({txt:last[col],type:type})
-  });
-  const d = await res.json();
-  if(d.url) window.open(d.url,"_blank");
-  else alert("Lỗi: "+(d.err||""));
+async function call(path, opts){
+  const r = await fetch(path, opts);
+  if(r.status === 401){ showLogin(); throw new Error("login"); }
+  return r.json();
 }
+
+async function send(c, preset){
+  const i = $("in-"+c.id), s = ST[c.id];
+  const m = (preset !== undefined ? preset : i.value).trim();
+  if(!m && !s.file && !s.sheet) return;
+  addMsg(c.id, "user", m || "Phân tích dữ liệu"); i.value = "";
+  const btn = $("sd-"+c.id); btn.disabled = true; btn.textContent = "⏳";
+  try{
+    const d = await call("/api/chat/"+(c.id==="general"?"general":c.id), {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({message:m, file_content:s.file, sheet_content:s.sheet})});
+    addMsg(c.id, "ai", d.reply || "❌ Không có phản hồi", d);
+  }catch(e){
+    addMsg(c.id, "ai", e.message === "login" ? "❌ Phiên đăng nhập đã hết, vui lòng đăng nhập lại." : "❌ Không kết nối được máy chủ (máy chủ miễn phí có thể đang khởi động, hãy thử lại sau ~1 phút).");
+  }finally{
+    btn.disabled = false; btn.textContent = "➤";
+  }
+}
+
+async function upload(c, f){
+  const fd = new FormData(); fd.append("file", f);
+  try{
+    const d = await call("/api/upload", {method:"POST", body:fd});
+    if(d.status === "ok"){
+      ST[c.id].file = d.content;
+      $("fb-"+c.id).firstChild.textContent = "📎 "+d.name;
+      $("fb-"+c.id).classList.remove("hidden");
+    } else alert(d.error || "Không tải được tệp");
+  }catch(e){ if(e.message !== "login") alert("Không tải được tệp: "+e.message); }
+}
+
+function wire(c){
+  $("in-"+c.id).addEventListener("keydown", e => { if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(c); } });
+  $("sd-"+c.id).onclick = () => send(c);
+  document.querySelectorAll("#card-"+c.id+" .q-btn").forEach(b => b.onclick = () => send(c, c.quick[b.dataset.k][1]));
+  if(c.file){
+    const z = $("up-"+c.id), fi = $("fi-"+c.id);
+    z.onclick = () => fi.click();
+    fi.onchange = () => { if(fi.files[0]) upload(c, fi.files[0]); };
+    z.ondragover = e => { e.preventDefault(); z.classList.add("drag"); };
+    z.ondragleave = () => z.classList.remove("drag");
+    z.ondrop = e => { e.preventDefault(); z.classList.remove("drag"); if(e.dataTransfer.files[0]) upload(c, e.dataTransfer.files[0]); };
+    $("fb-"+c.id).querySelector("button").onclick = () => { ST[c.id].file=""; fi.value=""; $("fb-"+c.id).classList.add("hidden"); };
+  }
+  if(c.sheet){
+    $("sb-"+c.id).onclick = async () => {
+      const url = $("su-"+c.id).value.trim(); if(!url) return;
+      try{
+        const d = await call("/api/connect-sheet", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({url})});
+        if(d.status === "ok"){ ST[c.id].sheet = d.content; $("sh-"+c.id).classList.remove("hidden"); }
+        else alert(d.error || "Không kết nối được Sheet");
+      }catch(e){ if(e.message !== "login") alert("Lỗi: "+e.message); }
+    };
+    $("sh-"+c.id).querySelector("button").onclick = () => { ST[c.id].sheet=""; $("su-"+c.id).value=""; $("sh-"+c.id).classList.add("hidden"); };
+  }
+}
+
+const grid = $("grid"), contact = $("contactCard");
+CARDS.forEach(c => {
+  ST[c.id] = {file:"", sheet:""};
+  const el = document.createElement("div");
+  el.className = "card "+c.cls; el.id = "card-"+c.id; el.innerHTML = cardHTML(c);
+  grid.insertBefore(el, contact);
+  wire(c); addMsg(c.id, "ai", c.hello);
+});
+
+function showLogin(){ $("login").classList.remove("hidden"); $("logoutBtn").classList.add("hidden"); $("lu").focus(); }
+function showApp(){ $("login").classList.add("hidden"); $("logoutBtn").classList.remove("hidden"); }
+async function doLogin(){
+  const b = $("lb"); b.disabled = true; $("loginErr").textContent = "";
+  try{
+    const r = await fetch("/api/login", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({username:$("lu").value, password:$("lp").value})});
+    const d = await r.json();
+    if(r.ok){ $("lp").value = ""; showApp(); } else $("loginErr").textContent = d.error || "Đăng nhập thất bại";
+  }catch(e){ $("loginErr").textContent = "Không kết nối được máy chủ, thử lại sau ~1 phút."; }
+  b.disabled = false;
+}
+$("lb").onclick = doLogin;
+$("lp").addEventListener("keydown", e => { if(e.key === "Enter") doLogin(); });
+$("lu").addEventListener("keydown", e => { if(e.key === "Enter") $("lp").focus(); });
+$("logoutBtn").onclick = async () => { await fetch("/api/logout", {method:"POST"}); showLogin(); };
+fetch("/api/me").then(r => r.json()).then(d => d.logged_in ? showApp() : showLogin()).catch(showLogin);
 </script>
 </body>
 </html>
 '''
 
-@app.route("/api/chat", methods=["POST"])
-def api_chat():
-    d = request.get_json(silent=True) or {}
-    rpy, raw = chat_ai(d.get("p",""), d.get("s", DEFAULT_PROMPT))
-    return jsonify({"rpy": rpy, "raw": raw})
-
-@app.route("/api/export", methods=["POST"])
-def api_export():
-    d = request.get_json(silent=True) or {}
-    txt = d.get("txt","")
-    if not txt: return jsonify({"err": "Không có nội dung"}), 400
-    fn = make_word(txt) if d.get("type")=="word" else make_excel(txt)
-    if not fn: return jsonify({"err": "Lỗi tạo file"}), 500
-    return jsonify({"url": f"/get/{fn}"})
-
-@app.route("/get/<fn>")
-def get_file(fn):
-    return send_from_directory(OUTPUT_FOLDER, fn, as_attachment=True)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
