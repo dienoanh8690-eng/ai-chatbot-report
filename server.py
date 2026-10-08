@@ -4,7 +4,6 @@ import re
 import time
 import uuid
 from datetime import datetime
-
 import requests
 from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
@@ -12,67 +11,82 @@ from docx import Document
 from openpyxl import Workbook, load_workbook
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # tối đa 10MB/tệp
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10MB
 CORS(app)
 
 # ==================================================
 # CẤU HÌNH — đặt trong Render → Environment
 # ==================================================
 def env(name, default=""):
-    return os.environ.get(name, default).strip()
+    val = os.environ.get(name, default)
+    return val.strip() if isinstance(val, str) else val
 
-AI_API_KEY = env("AI_API_KEY")                      # AIML API
+# --- Khóa API ---
+AI_API_KEY = env("AI_API_KEY")                      # AIML / DOLA
 AI_MODEL = env("AI_MODEL", "bytedance/dola-seed-2-0-pro")
+
 GEMINI_API_KEY = env("GEMINI_API_KEY")
-GEMINI_MODEL = env("GEMINI_MODEL", "gemini-3.8-flash")
+GEMINI_MODEL = env("GEMINI_MODEL", "gemini-2.0-flash")
+
 GROQ_API_KEY = env("GROQ_API_KEY")
 GROQ_MODEL = env("GROQ_MODEL", "llama-3.3-70b-versatile")
-OPENROUTER_API_KEY = env("OPEN_ROUTER") or env("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = env("OPENROUTER_MODEL", "openrouter/free")  # tự chọn model miễn phí đang chạy
+
+OPENROUTER_API_KEY = env("OPENROUTER") or env("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", "openrouter/auto")
+
 SAMBANOVA_API_KEY = env("SAMBANOVA")
 SAMBANOVA_MODEL = env("SAMBANOVA_MODEL", "Meta-Llama-3.3-70B-Instruct")
+
 HF_TOKEN = env("HUGGINGFACE_TOKEN")
 HF_MODEL = env("HF_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
-COHERE_API_KEY = env("COHERE").split("sk-ant")[0].strip()  # phòng khi dán nhầm khóa khác vào cuối
+
+COHERE_API_KEY = env("COHERE")
+if COHERE_API_KEY:
+    COHERE_API_KEY = COHERE_API_KEY.split("sk-ant")[0].strip()
 COHERE_MODEL = env("COHERE_MODEL", "command-a-03-2025")
+
 OPENAI_API_KEY = env("OPENAI_API_KEY")
 OPENAI_MODEL = env("OPENAI_MODEL", "gpt-4o-mini")
-CLAUDE_API_KEY = env("CLAUDE") or env("ANTHROPIC_API_KEY")
-CLAUDE_MODEL = env("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
-ADMIN_USER = env("ADMIN_USER")                      # tên đăng nhập (đặt trên Render)
-ADMIN_PASS = env("ADMIN_PASS")                      # mật khẩu (đặt trên Render)
-SECRET_KEY = env("SECRET_KEY") or os.urandom(24).hex()
-app.secret_key = SECRET_KEY
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
-                  SESSION_COOKIE_SECURE=bool(os.environ.get("RENDER")), PERMANENT_SESSION_LIFETIME=12 * 3600)
 
-TIMEOUT = 20
+CLAUDE_API_KEY = env("CLAUDE") or env("ANTHROPIC_API_KEY")
+CLAUDE_MODEL = env("CLAUDE_MODEL", "claude-3-5-haiku-20241022")
+
+# --- Đăng nhập ---
+ADMIN_USER = env("ADMIN_USER")
+ADMIN_PASS = env("ADMIN_PASS")
+SECRET_KEY = env("SECRET_KEY") or os.urandom(24).hex()
+
+app.secret_key = SECRET_KEY
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=bool(os.environ.get("RENDER")),
+    PERMANENT_SESSION_LIFETIME=12 * 3600
+)
+
+TIMEOUT = 25
 UPLOAD_FOLDER = "tai_lieu_tai_len"
 RESULT_FOLDER = "ket_qua_xuat_ra"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULT_FOLDER, exist_ok=True)
-MAC_DINH = "Trả lời bằng tiếng Việt rõ ràng, tự nhiên."
 
+MAC_DINH = "Trả lời bằng tiếng Việt rõ ràng, dễ hiểu, chính xác."
 
 # ==================================================
-# GỌI TỪNG AI — mỗi hàm trả về (tên, nội dung, lỗi)
+# HÀM HỖ TRỢ GỌI API
 # ==================================================
-MODEL_CACHE = {}  # tên AI -> model tự tìm được khi tên model cấu hình bị sai/đã đổi
+MODEL_CACHE = {}
 LOAI_TRU = ("whisper", "guard", "tts", "embed", "vision", "image", "audio", "moderation",
             "safeguard", "orpheus", "playai", "rerank", "speech", "transcri", "distil")
-UU_TIEN = ("llama-3.3-70b", "gpt-oss-120b", "gpt-oss-20b", "llama-3.1-70b", "qwen3", "qwen",
+UU_TIEN = ("llama-3.3-70b", "gpt-oss-120b", "llama-3.1-70b", "qwen3", "qwen",
            "llama", "gemma", "mistral", "deepseek")
 
-
 def _tach_khoa(chuoi):
-    """Cho phép đặt nhiều khóa trong một biến, ngăn cách bằng dấu phẩy."""
     return [k for k in re.split(r"[,;\s]+", chuoi or "") if k]
 
-
-def _tim_model_openai(base, key):
-    """Hỏi danh sách model của nhà cung cấp và chọn một model phù hợp."""
+def _tim_model_openai(base_url, key):
     try:
-        r = requests.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"}, timeout=10)
+        r = requests.get(f"{base_url}/models", headers={"Authorization": f"Bearer {key}"}, timeout=10)
         if r.status_code != 200:
             return None
         ids = [m.get("id", "") for m in r.json().get("data", [])]
@@ -85,11 +99,12 @@ def _tim_model_openai(base, key):
     except Exception:
         return None
 
-
 def _tim_model_gemini(key):
     try:
-        r = requests.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
-                         headers={"x-goog-api-key": key}, timeout=10)
+        r = requests.get(
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+            headers={"x-goog-api-key": key}, timeout=10
+        )
         if r.status_code != 200:
             return None
         ds = []
@@ -109,8 +124,7 @@ def _tim_model_gemini(key):
     except Exception:
         return None
 
-
-def _openai_style(ten, url, key, model, prompt, he_thong, timeout=TIMEOUT, base=None):
+def _goi_openai_style(ten, url, key, model, prompt, he_thong, timeout=TIMEOUT, base=None):
     khoa = _tach_khoa(key)
     if not khoa:
         return ten, None, "chưa đặt khóa API"
@@ -134,7 +148,7 @@ def _openai_style(ten, url, key, model, prompt, he_thong, timeout=TIMEOUT, base=
                     timeout=timeout,
                 )
             except Exception as e:
-                print(f"[{ten}] Exception: {e}", flush=True)
+                print(f"[{ten}] Lỗi kết nối: {type(e).__name__}", flush=True)
                 loi = f"lỗi kết nối ({type(e).__name__})"
                 break
             if res.status_code == 200:
@@ -143,53 +157,42 @@ def _openai_style(ten, url, key, model, prompt, he_thong, timeout=TIMEOUT, base=
                 except Exception:
                     text = ""
                 if text and text.strip():
-                    return ten, text, None
+                    return ten, text.strip(), None
                 loi = "phản hồi rỗng"
                 break
-            print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
+            print(f"[{ten}] HTTP {res.status_code}", flush=True)
             loi = f"HTTP {res.status_code}"
             if lan == 1 and base and res.status_code in (400, 404):
                 moi = _tim_model_openai(base, k)
                 if moi and moi != mdl:
-                    print(f"[{ten}] đổi sang model: {moi}", flush=True)
+                    print(f"[{ten}] Đổi model: {moi}", flush=True)
                     MODEL_CACHE[ten] = mdl = moi
                     continue
             break
     return ten, None, loi
 
-
+# ==================================================
+# HÀM GỌI TỪNG AI
+# ==================================================
 def goi_openrouter(prompt, he_thong=""):
-    return _openai_style("OpenRouter", "https://openrouter.ai/api/v1/chat/completions",
-                         OPENROUTER_API_KEY, OPENROUTER_MODEL, prompt, he_thong, timeout=35)
-
+    return _goi_openai_style(
+        "OpenRouter", "https://openrouter.ai/api/v1/chat/completions",
+        OPENROUTER_API_KEY, OPENROUTER_MODEL, prompt, he_thong, timeout=35
+    )
 
 def goi_groq(prompt, he_thong=""):
-    return _openai_style("Llama/Groq", "https://api.groq.com/openai/v1/chat/completions",
-                         GROQ_API_KEY, GROQ_MODEL, prompt, he_thong,
-                         base="https://api.groq.com/openai/v1")
-
+    return _goi_openai_style(
+        "Llama/Groq", "https://api.groq.com/openai/v1/chat/completions",
+        GROQ_API_KEY, GROQ_MODEL, prompt, he_thong,
+        base="https://api.groq.com/openai/v1"
+    )
 
 def goi_sambanova(prompt, he_thong=""):
-    return _openai_style("SambaNova", "https://api.sambanova.ai/v1/chat/completions",
-                         SAMBANOVA_API_KEY, SAMBANOVA_MODEL, prompt, he_thong,
-                         base="https://api.sambanova.ai/v1")
-
-
-def goi_huggingface(prompt, he_thong=""):
-    return _openai_style("HuggingFace", "https://router.huggingface.co/v1/chat/completions",
-                         HF_TOKEN, HF_MODEL, prompt, he_thong, timeout=30,
-                         base="https://router.huggingface.co/v1")
-
-
-def goi_aiml(prompt, he_thong=""):
-    return _openai_style("DOLA/AIML", "https://api.aimlapi.com/v1/chat/completions",
-                         AI_API_KEY, AI_MODEL, prompt, he_thong)
-
-
-def goi_gpt(prompt, he_thong=""):
-    return _openai_style("GPT", "https://api.openai.com/v1/chat/completions",
-                         OPENAI_API_KEY, OPENAI_MODEL, prompt, he_thong)
-
+    return _goi_openai_style(
+        "SambaNova", "https://api.sambanova.ai/v1/chat/completions",
+        SAMBANOVA_API_KEY, SAMBANOVA_MODEL, prompt, he_thong,
+        base="https://api.sambanova.ai/v1"
+    )
 
 def goi_gemini(prompt, he_thong=""):
     ten = "Gemini"
@@ -197,6 +200,7 @@ def goi_gemini(prompt, he_thong=""):
     if not khoa:
         return ten, None, "chưa đặt khóa API"
     loi = "lỗi không rõ"
+    he_thong_text = he_thong or MAC_DINH
     for k in khoa:
         mdl = MODEL_CACHE.get(ten, GEMINI_MODEL)
         for lan in (1, 2):
@@ -206,14 +210,16 @@ def goi_gemini(prompt, he_thong=""):
                     url,
                     headers={"x-goog-api-key": k, "Content-Type": "application/json"},
                     json={
-                        "systemInstruction": {"parts": [{"text": he_thong or MAC_DINH}]},
-                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                        "contents": [{
+                            "role": "user",
+                            "parts": [{"text": f"Hướng dẫn hệ thống: {he_thong_text}\n\nNội dung: {prompt}"}]
+                        }],
                         "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2048},
                     },
                     timeout=TIMEOUT,
                 )
             except Exception as e:
-                print(f"[{ten}] Exception: {e}", flush=True)
+                print(f"[{ten}] Lỗi kết nối: {type(e).__name__}", flush=True)
                 loi = f"lỗi kết nối ({type(e).__name__})"
                 break
             if res.status_code == 200:
@@ -225,17 +231,23 @@ def goi_gemini(prompt, he_thong=""):
                         return ten, text, None
                 loi = "phản hồi rỗng/bị chặn"
                 break
-            print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
+            print(f"[{ten}] HTTP {res.status_code}", flush=True)
             loi = f"HTTP {res.status_code}"
             if lan == 1 and res.status_code in (400, 404):
                 moi = _tim_model_gemini(k)
                 if moi and moi != mdl:
-                    print(f"[{ten}] đổi sang model: {moi}", flush=True)
+                    print(f"[{ten}] Đổi model: {moi}", flush=True)
                     MODEL_CACHE[ten] = mdl = moi
                     continue
             break
     return ten, None, loi
 
+def goi_huggingface(prompt, he_thong=""):
+    return _goi_openai_style(
+        "HuggingFace", "https://router.huggingface.co/v1/chat/completions",
+        HF_TOKEN, HF_MODEL, prompt, he_thong, timeout=30,
+        base="https://router.huggingface.co/v1"
+    )
 
 def goi_cohere(prompt, he_thong=""):
     ten = "Cohere"
@@ -262,12 +274,23 @@ def goi_cohere(prompt, he_thong=""):
             if text:
                 return ten, text, None
             return ten, None, "phản hồi rỗng"
-        print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
+        print(f"[{ten}] HTTP {res.status_code}", flush=True)
         return ten, None, f"HTTP {res.status_code}"
     except Exception as e:
-        print(f"[{ten}] Exception: {e}", flush=True)
+        print(f"[{ten}] Lỗi: {type(e).__name__}", flush=True)
         return ten, None, f"lỗi kết nối ({type(e).__name__})"
 
+def goi_aiml(prompt, he_thong=""):
+    return _goi_openai_style(
+        "DOLA/AIML", "https://api.aimlapi.com/v1/chat/completions",
+        AI_API_KEY, AI_MODEL, prompt, he_thong
+    )
+
+def goi_gpt(prompt, he_thong=""):
+    return _goi_openai_style(
+        "GPT", "https://api.openai.com/v1/chat/completions",
+        OPENAI_API_KEY, OPENAI_MODEL, prompt, he_thong
+    )
 
 def goi_claude(prompt, he_thong=""):
     ten = "Claude"
@@ -295,15 +318,28 @@ def goi_claude(prompt, he_thong=""):
             if text:
                 return ten, text, None
             return ten, None, "phản hồi rỗng"
-        print(f"[{ten}] HTTP {res.status_code}: {res.text[:300]}", flush=True)
+        print(f"[{ten}] HTTP {res.status_code}", flush=True)
         return ten, None, f"HTTP {res.status_code}"
     except Exception as e:
-        print(f"[{ten}] Exception: {e}", flush=True)
+        print(f"[{ten}] Lỗi: {type(e).__name__}", flush=True)
         return ten, None, f"lỗi kết nối ({type(e).__name__})"
 
+# ==================================================
+# CHUẨN THỨ TỰ THỬ AI — ưu tiên nhanh & miễn phí trước
+# ==================================================
+TAT_CA = [
+    goi_openrouter,
+    goi_groq,
+    goi_gemini,
+    goi_aiml,
+    goi_sambanova,
+    goi_huggingface,
+    goi_cohere,
+    goi_gpt,
+    goi_claude
+]
 
 def goi_theo_danh_sach(prompt, danh_sach_ham, he_thong=""):
-    """Thử lần lượt từng AI (bỏ qua AI chưa có khóa). Trả về dict: ok, reply, plain."""
     loi_tong = []
     for ham in danh_sach_ham:
         ten, kq, loi = ham(prompt, he_thong)
@@ -312,34 +348,47 @@ def goi_theo_danh_sach(prompt, danh_sach_ham, he_thong=""):
         if loi != "chưa đặt khóa API":
             loi_tong.append(f"{ten}: {loi}")
     if not loi_tong:
-        loi_tong.append("chưa cài khóa AI nào trên máy chủ")
-    reply = "❌ Tất cả AI đều không trả lời:\n" + "\n".join(f"× {x}" for x in loi_tong)
-    return {"ok": False, "reply": reply, "plain": ""}
-
-
-# Thứ tự thử: AI miễn phí trước, AI trả phí (dễ hết tiền) để cuối
-TAT_CA = [goi_openrouter, goi_groq, goi_sambanova, goi_gemini, goi_huggingface, goi_cohere,
-          goi_aiml, goi_gpt, goi_claude]
-
-CHATS = {
-    "general": ("Bạn là trợ lý AI tổng hợp, thông minh, hữu ích. Trả lời rõ ràng, dễ hiểu, bằng tiếng Việt.", TAT_CA),
-    "data": ("Bạn là chuyên gia phân tích dữ liệu và lập báo cáo. Trả lời bằng tiếng Việt, tóm tắt số liệu quan trọng, "
-             "dùng bảng khi phù hợp.", TAT_CA),
-    "doc": ("Bạn là chuyên gia soạn thảo văn bản hành chính, hợp đồng, thư từ. Viết chuẩn mực, đúng thể thức Việt Nam.",
-            TAT_CA),
-    "tender": ("Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, "
-               "hồ sơ, lưu ý pháp lý; nhắc người dùng đối chiếu văn bản pháp luật hiện hành.", TAT_CA),
-    "equip": ("Bạn là chuyên gia quản lý thiết bị nhà máy thủy điện. Phân loại, theo dõi tình trạng, đề xuất bảo trì, "
-              "tính tuổi thọ. Trả lời bằng tiếng Việt.", TAT_CA),
-}
-
+        loi_tong.append("chưa cấu hình khóa AI nào trên máy chủ")
+    return {
+        "ok": False,
+        "reply": "❌ Tất cả AI đều không trả lời:\n" + "\n".join(f"× {x}" for x in loi_tong),
+        "plain": ""
+    }
 
 # ==================================================
-# TẠO TỆP WORD & EXCEL
+# CHỨC NĂNG
+# ==================================================
+CHATS = {
+    "general": (
+        "Bạn là trợ lý AI tổng hợp, thông minh, hữu ích. Trả lời rõ ràng, dễ hiểu, bằng tiếng Việt.",
+        TAT_CA
+    ),
+    "data": (
+        "Bạn là chuyên gia phân tích dữ liệu và lập báo cáo. Trả lời bằng tiếng Việt, tóm tắt số liệu quan trọng, "
+        "dùng bảng khi phù hợp, đưa nhận xét và đề xuất cụ thể.",
+        TAT_CA
+    ),
+    "doc": (
+        "Bạn là chuyên gia soạn thảo văn bản hành chính, hợp đồng, thư từ. Viết chuẩn mực, đúng thể thức Việt Nam.",
+        TAT_CA
+    ),
+    "tender": (
+        "Bạn là chuyên gia tư vấn quy trình đấu thầu theo pháp luật Việt Nam. Hướng dẫn chi tiết từng bước, "
+        "danh mục hồ sơ, lưu ý pháp lý; nhắc đối chiếu văn bản hiện hành.",
+        TAT_CA
+    ),
+    "equip": (
+        "Bạn là chuyên gia quản lý thiết bị nhà máy thủy điện. Phân loại, theo dõi tình trạng, đề xuất bảo trì, "
+        "tính tuổi thọ. Trả lời bằng tiếng Việt.",
+        TAT_CA
+    ),
+}
+
+# ==================================================
+# XUẤT FILE
 # ==================================================
 def _sach(dong):
     return re.sub(r"[*#`]+", "", dong).strip()
-
 
 def tao_word(noi_dung):
     try:
@@ -347,6 +396,7 @@ def tao_word(noi_dung):
         doc = Document()
         doc.add_heading("BÁO CÁO", 0)
         doc.add_paragraph(f"Ngày tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+        doc.add_paragraph("")
         for dong in noi_dung.split("\n"):
             d = _sach(dong)
             if d and not re.fullmatch(r"[|\-:\s]+", d):
@@ -356,7 +406,6 @@ def tao_word(noi_dung):
     except Exception as e:
         print(f"Lỗi tạo Word: {e}", flush=True)
         return ""
-
 
 def tao_excel(noi_dung):
     try:
@@ -370,11 +419,12 @@ def tao_excel(noi_dung):
             d = dong.strip()
             if not d:
                 continue
-            if d.startswith("|"):  # dòng bảng markdown → tách thành ô
+            if d.startswith("|"):
                 if re.fullmatch(r"[|\-:\s]+", d):
                     continue
-                for i, cell in enumerate(d.strip("|").split("|"), start=1):
-                    ws.cell(row=hang, column=i, value=_sach(cell))
+                cells = [_sach(c) for c in d.strip("|").split("|")]
+                for i, c in enumerate(cells, 1):
+                    ws.cell(row=hang, column=i, value=c)
             else:
                 ws.cell(row=hang, column=1, value=_sach(d))
             hang += 1
@@ -384,54 +434,49 @@ def tao_excel(noi_dung):
         print(f"Lỗi tạo Excel: {e}", flush=True)
         return ""
 
-
-def doc_google_sheet(sheet_url):
+def doc_google_sheet(url):
     try:
-        m = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", sheet_url)
+        m = re.search(r"/spreadsheets/d/([a-zA-Z0-9_\-]+)", url)
         if not m:
-            return None, "❌ Link không đúng định dạng Google Sheets"
+            return None, "❌ Link Google Sheets không đúng định dạng"
         csv_url = f"https://docs.google.com/spreadsheets/d/{m.group(1)}/export?format=csv"
         res = requests.get(csv_url, timeout=15)
         if res.status_code == 200:
             res.encoding = "utf-8"
             return res.text, None
-        return None, "❌ Không đọc được Sheet → Chia sẻ: «Bất kỳ ai có đường liên kết» (Người xem)"
+        return None, "❌ Không đọc được Sheet → Chia sẻ: Bất kỳ ai có liên kết → Người xem"
     except Exception as e:
-        return None, f"❌ Lỗi đọc Sheet: {e}"
-
+        return None, f"❌ Lỗi: {e}"
 
 # ==================================================
-# ĐĂNG NHẬP (tài khoản lấy từ biến môi trường ADMIN_USER / ADMIN_PASS)
+# ĐĂNG NHẬP
 # ==================================================
-THU_SAI = {}  # ip -> (số lần sai, thời điểm hết khóa)
-
+THU_SAI = {}
 
 def _ip():
     return (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
 
-
 @app.before_request
-def bat_dang_nhap():
+def kiem_tra_dang_nhap():
     p = request.path
-    if p in ("/api/login", "/api/logout", "/api/me"):
+    if p in ("/api/login", "/api/logout", "/api/me", "/healthz"):
         return
     if (p.startswith("/api/") or p.startswith("/download/")) and not session.get("user"):
         return jsonify({"error": "Cần đăng nhập", "reply": "❌ Vui lòng đăng nhập."}), 401
 
-
 @app.route("/api/login", methods=["POST"])
 def login():
     ip = _ip()
-    so, khoa = THU_SAI.get(ip, (0, 0))
-    if khoa > time.time():
-        return jsonify({"error": "Sai quá nhiều lần, vui lòng thử lại sau vài phút."}), 429
+    so, het = THU_SAI.get(ip, (0, 0))
+    if het > time.time():
+        return jsonify({"error": "Sai quá nhiều lần, thử lại sau 5 phút"}), 429
     if not ADMIN_USER or not ADMIN_PASS:
-        return jsonify({"error": "Chưa cấu hình ADMIN_USER / ADMIN_PASS trên máy chủ."}), 500
+        return jsonify({"error": "Chưa cấu hình ADMIN_USER / ADMIN_PASS"}), 500
     d = request.get_json(silent=True) or {}
     u = str(d.get("username", "")).strip().lower().encode()
-    pw = str(d.get("password", "")).encode()
+    p = str(d.get("password", "")).encode()
     ok_u = hmac.compare_digest(u, ADMIN_USER.lower().encode())
-    ok_p = hmac.compare_digest(pw, ADMIN_PASS.encode())
+    ok_p = hmac.compare_digest(p, ADMIN_PASS.encode())
     if ok_u and ok_p:
         THU_SAI.pop(ip, None)
         session.clear()
@@ -440,19 +485,16 @@ def login():
         return jsonify({"status": "ok"})
     so += 1
     THU_SAI[ip] = (0, time.time() + 300) if so >= 5 else (so, 0)
-    return jsonify({"error": "Sai tên đăng nhập hoặc mật khẩu."}), 401
-
+    return jsonify({"error": "Sai tên đăng nhập hoặc mật khẩu"}), 401
 
 @app.route("/api/logout", methods=["POST"])
 def logout():
     session.clear()
     return jsonify({"status": "ok"})
 
-
 @app.route("/api/me")
 def me():
     return jsonify({"logged_in": bool(session.get("user"))})
-
 
 # ==================================================
 # API
@@ -468,51 +510,49 @@ def upload():
         return jsonify({"error": "Chỉ hỗ trợ .xlsx, .csv, .txt"}), 400
     duong_dan = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4().hex[:10]}.{ext}")
     tep.save(duong_dan)
-    noi_dung = ""
+    nd = ""
     try:
         if ext == "xlsx":
             wb = load_workbook(duong_dan, data_only=True, read_only=True)
             for ws in wb.worksheets:
-                noi_dung += f"=== Trang tính: {ws.title} ===\n"
+                nd += f"=== {ws.title} ===\n"
                 for hang in ws.iter_rows(values_only=True):
-                    noi_dung += " | ".join("" if c is None else str(c) for c in hang) + "\n"
-                    if len(noi_dung) > 6000:
+                    nd += " | ".join("" if c is None else str(c) for c in hang) + "\n"
+                    if len(nd) > 6000:
                         break
-                if len(noi_dung) > 6000:
+                if len(nd) > 6000:
                     break
             wb.close()
         else:
-            with open(duong_dan, "r", encoding="utf-8-sig", errors="ignore") as fh:
-                noi_dung = fh.read()
+            with open(duong_dan, "r", encoding="utf-8-sig", errors="ignore") as f:
+                nd = f.read(6000)
     except Exception as e:
-        noi_dung = f"(Không đọc được nội dung: {e})"
-    return jsonify({"status": "ok", "name": ten_goc, "content": noi_dung[:6000]})
-
+        nd = f"(Không đọc được: {e})"
+    return jsonify({"status": "ok", "name": ten_goc, "content": nd[:6000]})
 
 @app.route("/api/connect-sheet", methods=["POST"])
 def connect_sheet():
     url = ((request.get_json(silent=True) or {}).get("url") or "").strip()
     if not url:
         return jsonify({"error": "Vui lòng dán link Google Sheets"}), 400
-    noi_dung, loi = doc_google_sheet(url)
+    nd, loi = doc_google_sheet(url)
     if loi:
         return jsonify({"error": loi}), 400
-    return jsonify({"status": "ok", "content": noi_dung[:6000]})
-
+    return jsonify({"status": "ok", "content": nd[:6000]})
 
 @app.route("/api/chat/<kind>", methods=["POST"])
 def chat(kind):
     if kind not in CHATS:
         return jsonify({"reply": "❌ Chức năng không tồn tại"}), 404
-    data = request.get_json(silent=True) or {}
-    msg = (data.get("message") or "").strip()
-    ctx = "\n---\n".join(x for x in [(data.get("file_content") or "")[:6000],
-                                      (data.get("sheet_content") or "")[:6000]] if x.strip())
+    d = request.get_json(silent=True) or {}
+    msg = (d.get("message") or "").strip()
+    ctx = "\n---\n".join(x for x in [(d.get("file_content") or "")[:6000],
+                                    (d.get("sheet_content") or "")[:6000]] if x.strip())
     if not msg and not ctx:
         return jsonify({"reply": "Vui lòng nhập yêu cầu hoặc tải dữ liệu!"})
-    prompt = f"{msg or 'Hãy phân tích dữ liệu sau.'}\n\nDữ liệu đính kèm:\n{ctx}" if ctx else msg
-    he_thong, danh_sach = CHATS[kind]
-    kq = goi_theo_danh_sach(prompt, danh_sach, he_thong)
+    prompt = f"{msg or 'Hãy phân tích dữ liệu sau:'}\n\n{ctx}" if ctx else msg
+    he_thong, ds_ai = CHATS[kind]
+    kq = goi_theo_danh_sach(prompt, ds_ai, he_thong)
     out = {"reply": kq["reply"], "word": "", "excel": ""}
     if kind == "data" and kq["ok"]:
         w, x = tao_word(kq["plain"]), tao_excel(kq["plain"])
@@ -520,17 +560,13 @@ def chat(kind):
         out["excel"] = f"/download/{x}" if x else ""
     return jsonify(out)
 
-
 @app.route("/download/<path:ten_file>")
 def download(ten_file):
-    ten_file = os.path.basename(ten_file)
-    return send_from_directory(RESULT_FOLDER, ten_file, as_attachment=True)
-
+    return send_from_directory(RESULT_FOLDER, os.path.basename(ten_file), as_attachment=True)
 
 @app.route("/healthz")
 def healthz():
     return "ok"
-
 
 # ==================================================
 # GIAO DIỆN
@@ -538,7 +574,6 @@ def healthz():
 @app.route("/")
 def trang_chu():
     return TRANG_CHU
-
 
 TRANG_CHU = r'''<!DOCTYPE html>
 <html lang="vi">
@@ -550,9 +585,10 @@ TRANG_CHU = r'''<!DOCTYPE html>
 :root{--g100:#f1f5f9;--g200:#e2e8f0;--g600:#475569;--g800:#1e293b}
 *{margin:0;padding:0;box-sizing:border-box;font-family:Inter,"Segoe UI",Roboto,Arial,sans-serif}
 body{background:linear-gradient(135deg,#f0f7ff,#faf5ff);min-height:100vh;padding:20px}
-.header{text-align:center;margin-bottom:28px;padding-top:10px}
+.header{text-align:center;margin-bottom:28px;padding-top:10px;position:relative}
 .header h1{font-size:26px;color:var(--g800);margin-bottom:6px}
 .header p{color:var(--g600);font-size:14px}
+.logout{position:absolute;right:0;top:0;padding:8px 16px;border:1px solid var(--g200);border-radius:20px;background:#fff;cursor:pointer;font-size:13px}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;max-width:2200px;margin:0 auto}
 @media(max-width:1400px){.grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:768px){.grid{grid-template-columns:1fr}}
@@ -603,8 +639,6 @@ textarea:focus{border-color:var(--c)}
 .login-box button{width:100%;padding:12px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-weight:600;font-size:15px;cursor:pointer}
 .login-box button:disabled{opacity:.6}
 #loginErr{color:#b91c1c;font-size:13px;min-height:18px;margin-bottom:10px}
-.header{position:relative}
-.logout{position:absolute;right:0;top:0;padding:8px 16px;border:1px solid var(--g200);border-radius:20px;background:#fff;cursor:pointer;font-size:13px}
 </style>
 </head>
 <body>
@@ -637,29 +671,26 @@ textarea:focus{border-color:var(--c)}
 </div>
 </div>
 </div>
-
 <script>
 const CARDS = [
- {id:"general",cls:"c-gen",icon:"💬",title:"Trò chuyện chung",ai:"Tự động chọn AI khả dụng",
-  hello:"👋 Xin chào! Tôi là trợ lý AI tổng hợp. Bạn có thể hỏi bất kỳ điều gì nhé!",ph:"Hỏi bất kỳ điều gì...",
+ {id:"general",cls:"c-gen",icon:"💬",title:"Trò chuyện chung",ai:"Tự chọn AI khả dụng",
+  hello:"👋 Xin chào! Tôi là trợ lý AI tổng hợp. Hỏi bất kỳ điều gì nhé!",ph:"Hỏi bất kỳ điều gì...",
   quick:[["🔌 Thủy điện cơ bản","Giải thích khái niệm về nhà máy thủy điện"],["📰 Tin tức & Công nghệ","Tóm tắt xu hướng công nghệ mới trong ngành điện"],["💡 Ý tưởng & Đề xuất","Đề xuất ý tưởng tối ưu hóa hiệu suất làm việc"],["⚖️ Pháp luật chung","Giải đáp thắc mắc chung về pháp luật"]]},
- {id:"data",cls:"c-p1",icon:"📊",title:"Xử lý dữ liệu & Tạo báo cáo",ai:"Tự động chọn AI khả dụng",file:true,sheet:true,
-  hello:"👋 Tải tệp, dán link Google Sheets hoặc nhập yêu cầu để bắt đầu phân tích nhé!",ph:"Nhập yêu cầu phân tích...",
+ {id:"data",cls:"c-p1",icon:"📊",title:"Xử lý dữ liệu & Tạo báo cáo",ai:"Tự chọn AI khả dụng",file:true,sheet:true,
+  hello:"👋 Tải tệp, dán link Google Sheets hoặc nhập yêu cầu để phân tích nhé!",ph:"Nhập yêu cầu phân tích...",
   quick:[["📋 Sắp xếp dữ liệu","Sắp xếp và tóm tắt dữ liệu"],["💰 Tính tổng hợp","Tính tổng và phân tích số liệu"],["📑 Lập báo cáo","Lập báo cáo đầy đủ có cấu trúc"],["📈 Nhận xét & Đề xuất","Đánh giá xu hướng và đề xuất"]]},
- {id:"doc",cls:"c-p2",icon:"✍️",title:"Soạn thảo văn bản",ai:"Tự động chọn AI khả dụng",
-  hello:"👋 Tôi sẽ giúp bạn soạn thảo văn bản chuẩn mực, đúng thể thức Việt Nam. Bạn cần viết gì?",ph:"Bạn cần soạn thảo gì...?",
+ {id:"doc",cls:"c-p2",icon:"✍️",title:"Soạn thảo văn bản",ai:"Tự chọn AI khả dụng",
+  hello:"👋 Tôi sẽ giúp soạn thảo văn bản chuẩn mực, đúng thể thức Việt Nam. Bạn cần viết gì?",ph:"Bạn cần soạn thảo gì...?",
   quick:[["📝 Công văn","Soạn thảo công văn gửi cấp trên"],["📄 Hợp đồng","Soạn thảo hợp đồng mua bán thiết bị"],["📈 Báo cáo tiến độ","Viết báo cáo tiến độ thực hiện dự án"],["📋 Thư & Biên bản","Soạn thảo thư mời họp và biên bản"]]},
- {id:"tender",cls:"c-p3",icon:"🏆",title:"Quy trình đấu thầu",ai:"Tự động chọn AI khả dụng",
+ {id:"tender",cls:"c-p3",icon:"🏆",title:"Quy trình đấu thầu",ai:"Tự chọn AI khả dụng",
   hello:"👋 Tôi hướng dẫn chi tiết theo quy định Việt Nam. Bạn cần hỗ trợ về bước nào?",ph:"Hỏi về quy trình đấu thầu...?",
   quick:[["📋 Toàn bộ quy trình","Giải thích toàn bộ quy trình đấu thầu"],["📑 Hồ sơ mời thầu","Danh mục hồ sơ cần chuẩn bị"],["⚖️ Pháp lý & Rủi ro","Lưu ý pháp lý và rủi ro thường gặp"],["📄 Biểu mẫu","Mẫu biểu mẫu thông dụng"]]},
- {id:"equip",cls:"c-p4",icon:"🔧",title:"Quản lý thiết bị",ai:"Tự động chọn AI khả dụng",file:true,
+ {id:"equip",cls:"c-p4",icon:"🔧",title:"Quản lý thiết bị",ai:"Tự chọn AI khả dụng",file:true,
   hello:"👋 Tải danh sách thiết bị hoặc nhập yêu cầu — tôi sẽ phân tích chi tiết nhé!",ph:"Nhập yêu cầu quản lý thiết bị...?",
-  quick:[["📊 Phân loại thiết bị","Phân loại thiết bị theo nhóm"],["🛠️ Kế hoạch bảo trì","Đề xuất kế hoạch bảo trì định kỳ"],["⚠️ Đánh giá rủi ro","Đánh giá tình trạng và rủi ro"],["🔄 Tuổi thọ & Thay thế","Tính tuổi thọ và đề xuất thay thế"]]}
+  quick:[["📊 Phân loại thiết bị","Phân loại theo nhóm chức năng"],["🛠️ Kế hoạch bảo trì","Đề xuất kế hoạch bảo trì định kỳ"],["⚠️ Đánh giá rủi ro","Đánh giá tình trạng và nguy cơ hỏng hóc"],["🔄 Tuổi thọ & Thay thế","Tính tuổi thọ và đề xuất thời điểm thay thế"]]}
 ];
-
 const $ = id => document.getElementById(id);
 const ST = {};
-
 function cardHTML(c){
   return '<div class="card-head"><span class="card-icon">'+c.icon+'</span><h3 class="card-title">'+c.title+'</h3><span class="card-ai">'+c.ai+'</span></div>'
   +(c.file?'<div class="upload-zone" id="up-'+c.id+'"><p>📎 Nhấn chọn hoặc kéo thả tệp (.xlsx, .csv, .txt)</p></div><input type="file" id="fi-'+c.id+'" accept=".xlsx,.csv,.txt" class="hidden"><div class="file-bar hidden" id="fb-'+c.id+'"><span></span><button>✕</button></div>':"")
@@ -668,7 +699,6 @@ function cardHTML(c){
   +'<div class="chat-area" id="ch-'+c.id+'"></div>'
   +'<div class="input-row"><textarea id="in-'+c.id+'" placeholder="'+c.ph+'"></textarea><button class="send-btn" id="sd-'+c.id+'">➤</button></div>';
 }
-
 function addMsg(id, type, text, d){
   const m = document.createElement("div"); m.className = "msg "+type;
   const b = document.createElement("div"); b.className = "bubble"+(text.includes("❌")?" err":text.includes("⚠️")?" warn":"");
@@ -681,13 +711,11 @@ function addMsg(id, type, text, d){
   }
   const c = $("ch-"+id); c.appendChild(m); c.scrollTop = c.scrollHeight;
 }
-
 async function call(path, opts){
   const r = await fetch(path, opts);
   if(r.status === 401){ showLogin(); throw new Error("login"); }
   return r.json();
 }
-
 async function send(c, preset){
   const i = $("in-"+c.id), s = ST[c.id];
   const m = (preset !== undefined ? preset : i.value).trim();
@@ -695,16 +723,15 @@ async function send(c, preset){
   addMsg(c.id, "user", m || "Phân tích dữ liệu"); i.value = "";
   const btn = $("sd-"+c.id); btn.disabled = true; btn.textContent = "⏳";
   try{
-    const d = await call("/api/chat/"+(c.id==="general"?"general":c.id), {method:"POST", headers:{"Content-Type":"application/json"},
+    const d = await call("/api/chat/"+c.id, {method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({message:m, file_content:s.file, sheet_content:s.sheet})});
     addMsg(c.id, "ai", d.reply || "❌ Không có phản hồi", d);
   }catch(e){
-    addMsg(c.id, "ai", e.message === "login" ? "❌ Phiên đăng nhập đã hết, vui lòng đăng nhập lại." : "❌ Không kết nối được máy chủ (máy chủ miễn phí có thể đang khởi động, hãy thử lại sau ~1 phút).");
+    addMsg(c.id, "ai", e.message === "login" ? "❌ Phiên làm việc đã hết, vui lòng đăng nhập lại." : "❌ Máy chủ đang khởi động, vui lòng chờ ~1 phút rồi thử lại.");
   }finally{
     btn.disabled = false; btn.textContent = "➤";
   }
 }
-
 async function upload(c, f){
   const fd = new FormData(); fd.append("file", f);
   try{
@@ -714,9 +741,8 @@ async function upload(c, f){
       $("fb-"+c.id).firstChild.textContent = "📎 "+d.name;
       $("fb-"+c.id).classList.remove("hidden");
     } else alert(d.error || "Không tải được tệp");
-  }catch(e){ if(e.message !== "login") alert("Không tải được tệp: "+e.message); }
+  }catch(e){ if(e.message !== "login") alert("Lỗi tải tệp: "+e.message); }
 }
-
 function wire(c){
   $("in-"+c.id).addEventListener("keydown", e => { if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(c); } });
   $("sd-"+c.id).onclick = () => send(c);
@@ -742,7 +768,6 @@ function wire(c){
     $("sh-"+c.id).querySelector("button").onclick = () => { ST[c.id].sheet=""; $("su-"+c.id).value=""; $("sh-"+c.id).classList.add("hidden"); };
   }
 }
-
 const grid = $("grid"), contact = $("contactCard");
 CARDS.forEach(c => {
   ST[c.id] = {file:"", sheet:""};
@@ -751,29 +776,4 @@ CARDS.forEach(c => {
   grid.insertBefore(el, contact);
   wire(c); addMsg(c.id, "ai", c.hello);
 });
-
-function showLogin(){ $("login").classList.remove("hidden"); $("logoutBtn").classList.add("hidden"); $("lu").focus(); }
-function showApp(){ $("login").classList.add("hidden"); $("logoutBtn").classList.remove("hidden"); }
-async function doLogin(){
-  const b = $("lb"); b.disabled = true; $("loginErr").textContent = "";
-  try{
-    const r = await fetch("/api/login", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({username:$("lu").value, password:$("lp").value})});
-    const d = await r.json();
-    if(r.ok){ $("lp").value = ""; showApp(); } else $("loginErr").textContent = d.error || "Đăng nhập thất bại";
-  }catch(e){ $("loginErr").textContent = "Không kết nối được máy chủ, thử lại sau ~1 phút."; }
-  b.disabled = false;
-}
-$("lb").onclick = doLogin;
-$("lp").addEventListener("keydown", e => { if(e.key === "Enter") doLogin(); });
-$("lu").addEventListener("keydown", e => { if(e.key === "Enter") $("lp").focus(); });
-$("logoutBtn").onclick = async () => { await fetch("/api/logout", {method:"POST"}); showLogin(); };
-fetch("/api/me").then(r => r.json()).then(d => d.logged_in ? showApp() : showLogin()).catch(showLogin);
-</script>
-</body>
-</html>
-'''
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+function showLogin(){ $("login").classList.remove("hidden"); $("logoutBtn").classList.add("
